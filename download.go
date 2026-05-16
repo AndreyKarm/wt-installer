@@ -68,29 +68,20 @@ func DownloadSkin(post Post) {
 	}()
 }
 
-// detectZipRoot returns the single common top-level directory name if every
-// entry in the zip shares one, otherwise returns "".
 func detectZipRoot(r *zip.ReadCloser) string {
 	var root string
 	for _, f := range r.File {
-		// Normalise separators and take the first path component
 		parts := strings.SplitN(filepath.ToSlash(f.Name), "/", 2)
 		top := parts[0]
 		if root == "" {
 			root = top
 		} else if top != root {
-			return "" // multiple roots — no single common folder
+			return ""
 		}
 	}
 	return root
 }
 
-// ExtractZip extracts src into baseDir.
-//
-//   - If the zip has a single top-level directory (e.g. wiesel_1_tow/…),
-//     files land in baseDir/wiesel_1_tow/… directly.
-//   - If the zip has files at its root, they are placed inside
-//     baseDir/fallbackName/… so they don't scatter into baseDir.
 func ExtractZip(src, baseDir, fallbackName string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -98,10 +89,8 @@ func ExtractZip(src, baseDir, fallbackName string) error {
 	}
 	defer r.Close()
 
-	// Decide the extraction root
 	dest := baseDir
 	if detectZipRoot(r) == "" {
-		// No common root folder — wrap in a named subdirectory
 		dest = filepath.Join(baseDir, fallbackName)
 	}
 

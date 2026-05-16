@@ -28,4 +28,4 @@ go.work.sum
 rsrc.syso
 *.exe
 /temp
-/config.*
+/config.json

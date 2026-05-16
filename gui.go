@@ -259,7 +259,7 @@ func loop() {
 }
 
 func main() {
-	rgba, err := g.LoadImage("./res/app_win.jpg")
+	rgba, err := g.LoadImage("./media/favicon.png")
 	if err != nil {
 		fmt.Println("Error loading fallback image:", err)
 	}
@@ -273,6 +273,8 @@ func main() {
 			tex = t
 		})
 	}
+
+	wnd.SetIcon(rgba)
 
 	cfg, err := LoadConfig()
 	if err != nil {
