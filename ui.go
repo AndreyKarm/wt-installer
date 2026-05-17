@@ -2,116 +2,15 @@ package main
 
 import (
 	"fmt"
-	"image"
 
 	g "github.com/AllenDang/giu"
 )
 
-var (
-	activeTab int32 = 0
-
-	filters         ApiHeadResponse
-	countrySelected int32
-	typeSelected    int32
-	classSelected   int32
-	vehicleSelected int32
-	feedSort        int32
-	textInput       string
-
-	// Config
-	currentConfig *Config
-	skinPathInput string
-
-	rgba *image.RGBA
-	tex  *g.Texture
-
-	// State
-	fetchedPosts   []Post
-	downloadStatus = map[int]string{}
-	skinToDelete   string
-	currentPage    int32 = 0
-
-	criteria = map[string]string{
-		"content":        "camouflage",
-		"sort":           "created",
-		"user":           "",
-		"searchString":   "",
-		"page":           "0",
-		"featured":       "0",
-		"vehicleCountry": "",
-		"vehicleType":    "",
-		"vehicleClass":   "",
-		"vehicle":        "",
-	}
-
-	// Warthunder Live API
-	baseUrl = "https://live.warthunder.com"
-	regular = "/api/feed/get_regular/"
-	head    = "/api/feed/get_head/"
-	lang    = "en"
-)
-
-const deletePopupID = "Confirm Delete##deleteModal"
-
-func FilterVariants(variants []Variant, criteria map[string]string) []Variant {
-	var filtered []Variant
-	for _, v := range variants {
-		if v.Separator {
-			continue
-		}
-		if v.Value == "any" {
-			filtered = append(filtered, v)
-			continue
-		}
-		if len(v.Dep) == 0 {
-			filtered = append(filtered, v)
-			continue
-		}
-		match := true
-		for depKey, depValues := range v.Dep {
-			selectedVal := criteria[depKey]
-			if selectedVal == "" {
-				continue
-			}
-			valMatch := false
-			for _, dv := range depValues {
-				if dv == selectedVal {
-					valMatch = true
-					break
-				}
-			}
-			if !valMatch {
-				match = false
-				break
-			}
-		}
-		if match {
-			filtered = append(filtered, v)
-		}
-	}
-	return filtered
-}
-
-func GetLabel(variants []Variant, idx int32) string {
-	if len(variants) == 0 {
-		return "Loading..."
-	}
-	if idx < 0 || int(idx) >= len(variants) {
-		return variants[0].Name
-	}
-	return variants[idx].Name
-}
-
-func GetItems(variants []Variant) []string {
-	items := make([]string, len(variants))
-	for i, v := range variants {
-		if v.Count > 0 {
-			items[i] = fmt.Sprintf("%s (%v)", v.Name, v.Count)
-		} else {
-			items[i] = v.Name
-		}
-	}
-	return items
+func onSearch() {
+	criteria["searchString"] = WordsToHashtags(searchInput)
+	currentPage = 0
+	criteria["page"] = "0"
+	go OnRequestData()
 }
 
 func loop() {
@@ -131,10 +30,29 @@ func loop() {
 	}
 
 	g.SingleWindow().Layout(
-		g.Label("WarThunder Camo Browser"),
-
 		g.TabBar().TabItems(
 			g.TabItem("Download").Layout(
+				g.Row(
+					g.Label("Search"),
+					g.InputText(&searchInput).
+						Hint("e.g. historical ussr").
+						Size(240),
+					g.Custom(func() {
+						if g.IsKeyPressed(g.KeyEnter) {
+							onSearch()
+						}
+					}),
+					g.Label(WordsToHashtags(searchInput)),
+					g.Button("Search##searchbtn").OnClick(onSearch),
+					g.Button("Clear##clearbtn").OnClick(func() {
+						searchInput = ""
+						criteria["searchString"] = ""
+						currentPage = 0
+						criteria["page"] = "0"
+						go OnRequestData()
+					}),
+				),
+
 				g.Row(
 					g.Label("Sort"),
 					g.Combo("", sortOptions[feedSort], sortOptions, &feedSort).
@@ -190,7 +108,8 @@ func loop() {
 						GetItems(filteredVehicles), &vehicleSelected,
 					).OnChange(func() {
 						if int(vehicleSelected) < len(filteredVehicles) {
-							criteria["vehicle"] = filteredVehicles[vehicleSelected].Value
+							criteria["vehicle"] =
+								filteredVehicles[vehicleSelected].Value
 							go OnRequestData()
 						}
 					}).Size(160).Filter(true),
@@ -236,66 +155,5 @@ func loop() {
 				}),
 			),
 		),
-
-		// Delete confirmation modal
-		g.PopupModal(deletePopupID).Layout(
-			g.Label(fmt.Sprintf("Delete '%s'?", skinToDelete)),
-			g.Label("This will permanently remove the skin folder."),
-			g.Dummy(0, 8),
-			g.Row(
-				g.Button("Delete").OnClick(func() {
-					name := skinToDelete
-					skinToDelete = ""
-					DeleteSkin(name)
-					g.CloseCurrentPopup()
-				}),
-				g.Button("Cancel").OnClick(func() {
-					skinToDelete = ""
-					g.CloseCurrentPopup()
-				}),
-			),
-		),
 	)
-}
-
-func main() {
-	rgba, err := g.LoadImage("./media/favicon.png")
-	if err != nil {
-		fmt.Println("Error loading fallback image:", err)
-	}
-
-	wnd := g.NewMasterWindow(
-		"WTLive Installer", 1200, 900, g.MasterWindowFlagsTransparent,
-	)
-
-	if rgba != nil {
-		g.EnqueueNewTextureFromRgba(rgba, func(t *g.Texture) {
-			tex = t
-		})
-	}
-
-	wnd.SetIcon(rgba)
-
-	cfg, err := LoadConfig()
-	if err != nil {
-		fmt.Println("Error loading config, using defaults:", err)
-		cfg = GetDefaultConfig()
-	}
-	currentConfig = cfg
-	skinPathInput = currentConfig.UserSkins
-
-	go func() {
-		data, err := GetFiltersFromAPI(criteria)
-		if err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-		filters = *data
-		fmt.Println("Filters loaded!")
-		g.Update()
-	}()
-
-	go OnRequestData()
-
-	wnd.Run(loop)
 }

@@ -1,6 +1,6 @@
 @echo off
 
-set EXE_NAME=WTInstaller.exe
+set EXE_NAME="WT Installer.exe"
 
 echo Cleaning old resources...
 if exist rsrc.syso del rsrc.syso
