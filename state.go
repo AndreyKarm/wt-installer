@@ -24,8 +24,9 @@ var (
 	searchInput     string
 
 	// Texture
-	rgba *image.RGBA
-	tex  *g.Texture
+	rgba        *image.RGBA
+	tex         *g.Texture
+	fallbackTex *g.Texture
 
 	// Config
 	currentConfig *Config

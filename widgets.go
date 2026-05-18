@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -111,10 +113,10 @@ func BuildCamoList() []g.Widget {
 					g.OpenPopup(fmt.Sprintf("Images %d", post.ID))
 				}).
 				LayoutForLoading(
-					g.ImageWithFile("media/fallback.png").Size(100, 100),
+					g.Image(fallbackTex).Size(100, 100),
 				).
 				LayoutForFailure(
-					g.ImageWithFile("media/fallback.png").Size(100, 100),
+					g.Image(fallbackTex).Size(100, 100),
 				),
 			g.PopupModal(fmt.Sprintf("Images %d", post.ID)).Layout(
 				g.Custom(func() {
@@ -156,9 +158,13 @@ func LoadedCamoList() []g.Widget {
 			continue
 		}
 		name := entry.Name()
+		directory := filepath.Join(config.UserSkins, name)
 		if skinToDelete == name {
 			widgets = append(widgets, g.Row(
 				g.Label(name),
+				g.Button("Open folder").OnClick(func() {
+					exec.Command("explorer", directory).Start()
+				}),
 				g.Label("  Delete this skin?"),
 				g.Button(fmt.Sprintf("Yes, Delete##yes%s", name)).
 					Size(100, 0).
@@ -175,6 +181,9 @@ func LoadedCamoList() []g.Widget {
 		} else {
 			widgets = append(widgets, g.Row(
 				g.Label(name),
+				g.Button("Open folder").OnClick(func() {
+					exec.Command("explorer", directory).Start()
+				}),
 				g.Button(fmt.Sprintf("Delete##del%s", name)).
 					Size(80, 0).
 					OnClick(func() {

@@ -17,9 +17,9 @@ var (
 
 func main() {
 	var err error
-	rgba, err = g.LoadImage("./media/favicon.png")
+	rgba, err = decodeEmbeddedRGBA(faviconBytes)
 	if err != nil {
-		fmt.Println("Error loading fallback image:", err)
+		fmt.Println("Error decoding embedded favicon:", err)
 	}
 
 	wnd = g.NewMasterWindow(
@@ -30,9 +30,15 @@ func main() {
 		g.EnqueueNewTextureFromRgba(rgba, func(t *g.Texture) {
 			tex = t
 		})
+		wnd.SetIcon(rgba)
 	}
 
-	wnd.SetIcon(rgba)
+	fallbackRGBA, err := decodeEmbeddedRGBA(fallbackBytes)
+	if err == nil {
+		g.EnqueueNewTextureFromRgba(fallbackRGBA, func(t *g.Texture) {
+			fallbackTex = t
+		})
+	}
 
 	cfg, err := LoadConfig()
 	if err != nil {
