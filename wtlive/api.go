@@ -1,4 +1,4 @@
-package main
+package wtlive
 
 import (
 	"bytes"
@@ -8,6 +8,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"regexp"
+)
+
+const (
+	BaseURL     = "https://live.warthunder.com"
+	RegularPath = "/api/feed/get_regular/"
+	HeadPath    = "/api/feed/get_head/"
 )
 
 func createFormBody(fields map[string]string) (io.Reader, string, error) {
@@ -30,7 +36,7 @@ func GetFiltersFromAPI(fields map[string]string) (*ApiHeadResponse, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, baseURL+headPath, body)
+	req, err := http.NewRequest(http.MethodPost, BaseURL+HeadPath, body)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +77,7 @@ func GetFeed(fields map[string]string) (*ApiFeedResponse, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, baseURL+regularPath, body)
+	req, err := http.NewRequest(http.MethodPost, BaseURL+RegularPath, body)
 	if err != nil {
 		return nil, err
 	}

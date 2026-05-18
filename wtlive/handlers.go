@@ -1,4 +1,4 @@
-package main
+package wtlive
 
 import (
 	"fmt"
@@ -7,19 +7,40 @@ import (
 	g "github.com/AllenDang/giu"
 )
 
+var (
+	FetchedPosts     []Post
+	currentRequestID int64
+	Filters          ApiHeadResponse
+
+	Criteria = map[string]string{
+		"content":        "camouflage",
+		"sort":           "created",
+		"user":           "",
+		"searchString":   "",
+		"page":           "0",
+		"featured":       "0",
+		"vehicleCountry": "",
+		"vehicleType":    "",
+		"vehicleClass":   "",
+		"vehicle":        "",
+	}
+
+	Lang = "en"
+)
+
 func OnRequestData() {
-	snapshot := make(map[string]string, len(criteria))
-	for k, v := range criteria {
+	snapshot := make(map[string]string, len(Criteria))
+	for k, v := range Criteria {
 		snapshot[k] = v
 	}
 
 	myID := atomic.AddInt64(&currentRequestID, 1)
 
-	fetchedPosts = []Post{}
+	FetchedPosts = []Post{}
 	fmt.Printf("Fetching page %s...\n", snapshot["page"])
 	g.Update()
 
-	result, err := GetFeed(criteria)
+	result, err := GetFeed(Criteria)
 	if err != nil {
 		fmt.Println("Error fetching feed:", err)
 		return
@@ -35,29 +56,28 @@ func OnRequestData() {
 		return
 	}
 
-	fetchedPosts = append(fetchedPosts, result.Data.List...)
-	fmt.Printf("Done! Fetched %d posts.\n", len(fetchedPosts))
+	FetchedPosts = append(FetchedPosts, result.Data.List...)
 	g.Update()
 }
 
 func OnRequestHead() {
-	snapshot := make(map[string]string, len(criteria))
-	for k, v := range criteria {
+	snapshot := make(map[string]string, len(Criteria))
+	for k, v := range Criteria {
 		snapshot[k] = v
 	}
 
-	newFilters, err := GetFiltersFromAPI(criteria)
+	newFilters, err := GetFiltersFromAPI(Criteria)
 	if err != nil {
 		fmt.Println("Error fetching filters:", err)
 		return
 	}
-	filters = *newFilters
+	Filters = *newFilters
 	fmt.Println("Filters reloaded!")
 	g.Update()
 }
 
 func OpenSkin(id int) {
-	url := fmt.Sprintf("%s/post/%d/%s/", baseURL, id, lang)
+	url := fmt.Sprintf("%s/post/%d/%s/", BaseURL, id, Lang)
 	fmt.Printf("Opening: %s\n", url)
 	g.OpenURL(url)
 }

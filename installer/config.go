@@ -1,4 +1,4 @@
-package main
+package installer
 
 import (
 	"encoding/json"
@@ -8,6 +8,11 @@ import (
 type Config struct {
 	UserSkins string `json:"UserSkins"`
 }
+
+var (
+	CurrentConfig *Config
+	SkinPathInput string
+)
 
 const configName = "config.json"
 

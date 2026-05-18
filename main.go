@@ -2,30 +2,31 @@ package main
 
 import (
 	"bytes"
-	"embed"
 	"fmt"
 	"image"
-	"image/png"
+	"liotom/installer/installer"
+	"liotom/installer/wtlive"
 
 	g "github.com/AllenDang/giu"
 )
 
-var (
-	wnd     *g.MasterWindow
-	mediaFS embed.FS
-)
+var wnd *g.MasterWindow
 
 func main() {
-	var err error
-	rgba, err = decodeEmbeddedRGBA(faviconBytes)
-	if err != nil {
+	// Set favicon
+	if img, _, err := image.Decode(bytes.NewReader(faviconBytes)); err == nil {
+		rgba = g.ImageToRgba(img)
+	} else {
 		fmt.Println("Error decoding embedded favicon:", err)
 	}
 
-	wnd = g.NewMasterWindow(
-		"WTLive Installer", 1200, 900, 0,
-	)
+	wnd = g.NewMasterWindow("WTLive Installer", 1200, 900, 0)
 
+	// Set font
+	g.Context.FontAtlas.SetDefaultFontSize(16)
+	g.Context.FontAtlas.SetDefaultFontFromBytes(skyquakeFontBytes, 16)
+
+	// Set icon
 	if rgba != nil {
 		g.EnqueueNewTextureFromRgba(rgba, func(t *g.Texture) {
 			tex = t
@@ -33,46 +34,35 @@ func main() {
 		wnd.SetIcon(rgba)
 	}
 
-	fallbackRGBA, err := decodeEmbeddedRGBA(fallbackBytes)
-	if err == nil {
-		g.EnqueueNewTextureFromRgba(fallbackRGBA, func(t *g.Texture) {
-			fallbackTex = t
+	// Set fallback texture
+	if img, _, err := image.Decode(bytes.NewReader(fallbackBytes)); err == nil {
+		g.EnqueueNewTextureFromRgba(g.ImageToRgba(img), func(t *g.Texture) {
+			FallbackTex = t
 		})
 	}
 
-	cfg, err := LoadConfig()
+	// Load config
+	cfg, err := installer.LoadConfig()
 	if err != nil {
 		fmt.Println("Error loading config, using defaults:", err)
-		cfg = GetDefaultConfig()
+		cfg = installer.GetDefaultConfig()
 	}
-	currentConfig = cfg
-	skinPathInput = currentConfig.UserSkins
+	installer.CurrentConfig = cfg
+	installer.SkinPathInput = installer.CurrentConfig.UserSkins
 
+	// Fetch filters
 	go func() {
-		data, err := GetFiltersFromAPI(criteria)
+		data, err := wtlive.GetFiltersFromAPI(wtlive.Criteria)
 		if err != nil {
 			fmt.Println("Error fetching filters:", err)
 			return
 		}
-		filters = *data
-		fmt.Println("Filters loaded!")
+		wtlive.Filters = *data
 		g.Update()
 	}()
 
-	go OnRequestData()
+	// Fetch data
+	go wtlive.OnRequestData()
 
 	wnd.Run(loop)
-}
-
-func loadEmbeddedImage(path string) (*image.RGBA, error) {
-	data, err := mediaFS.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	img, err := png.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	rgba := image.NewRGBA(img.Bounds())
-	return rgba, nil
 }
