@@ -18,16 +18,32 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.2"
           cache: true
 
+      - name: Install rsrc
+        run: go install github.com/akavel/rsrc@latest
+
+      - name: Generate icon resource
+        run: rsrc -ico media/favicon.ico -o rsrc.syso
+
       - name: Build
-        run: go build -ldflags="-H=windowsgui" -o WTLiveInstaller.exe .
+        run: >
+          go build
+          -ldflags="-s -w -H=windowsgui -extldflags=-static"
+          -o "WT Installer.exe" .
+
+      - name: Package release
+        run: |
+          mkdir release
+          cp "WT Installer.exe" release/
+          cp -r media release/
+          Compress-Archive -Path release/* -DestinationPath WTLiveInstaller.zip
+        shell: pwsh
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            WTLiveInstaller.exe
+          files: WTLiveInstaller.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

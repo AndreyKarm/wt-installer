@@ -1,12 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"embed"
 	"fmt"
+	"image"
+	"image/png"
 
 	g "github.com/AllenDang/giu"
 )
 
-var wnd *g.MasterWindow
+var (
+	wnd     *g.MasterWindow
+	mediaFS embed.FS
+)
 
 func main() {
 	var err error
@@ -49,4 +56,17 @@ func main() {
 	go OnRequestData()
 
 	wnd.Run(loop)
+}
+
+func loadEmbeddedImage(path string) (*image.RGBA, error) {
+	data, err := mediaFS.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	rgba := image.NewRGBA(img.Bounds())
+	return rgba, nil
 }
