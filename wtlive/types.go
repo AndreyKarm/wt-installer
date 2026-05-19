@@ -1,7 +1,6 @@
 package wtlive
 
 // Feed types
-
 type ApiFeedResponse struct {
 	Status string `json:"status"`
 	Data   Data   `json:"data"`
@@ -48,7 +47,6 @@ type File struct {
 }
 
 // Filter types
-
 type ApiHeadResponse struct {
 	VehicleCountry Filter `json:"vehicleCountry"`
 	VehicleType    Filter `json:"vehicleType"`

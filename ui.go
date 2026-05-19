@@ -7,6 +7,7 @@ import (
 func loop() {
 	g.SingleWindow().Layout(
 		g.TabBar().TabItems(
+
 			g.TabItem("Download").Layout(
 				g.Child().Layout(
 					g.Column(DownloadPage()...),
@@ -20,7 +21,9 @@ func loop() {
 			),
 
 			g.TabItem("Settings").Layout(
-				g.Child().Layout(SettingsPage()...),
+				g.Child().Layout(
+					g.Column(SettingsPage()...),
+				),
 			),
 		),
 	)

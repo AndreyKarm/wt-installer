@@ -10,6 +10,11 @@ import (
 	g "github.com/AllenDang/giu"
 )
 
+var (
+	skinToDelete    string
+	openDeletePopup bool
+)
+
 func InstalledPage() []g.Widget {
 	var widgets []g.Widget
 
@@ -42,7 +47,8 @@ func InstalledPage() []g.Widget {
 					exec.Command("explorer", directory).Start()
 				}),
 				g.Selectable("Delete").OnClick(func() {
-					installer.DeleteSkin(name)
+					skinToDelete = name
+					openDeletePopup = true
 				}),
 			),
 		))
@@ -54,5 +60,23 @@ func InstalledPage() []g.Widget {
 			Rows(
 				rows...,
 			),
+
+		g.Custom(func() {
+			if openDeletePopup {
+				g.OpenPopup("Confirm Delete")
+				openDeletePopup = false
+			}
+		}),
+
+		g.PopupModal("Confirm Delete").Layout(
+			g.Label("Are you sure you want to delete?"),
+			g.Row(
+				g.Button("Yes").OnClick(func() {
+					installer.DeleteSkin(skinToDelete)
+					g.CloseCurrentPopup()
+				}),
+				g.Button("No").OnClick(func() { g.CloseCurrentPopup() }),
+			),
+		),
 	}
 }

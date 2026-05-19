@@ -3,6 +3,7 @@ package wtlive
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	g "github.com/AllenDang/giu"
 )
@@ -11,6 +12,9 @@ var (
 	FetchedPosts     []Post
 	currentRequestID int64
 	Filters          ApiHeadResponse
+
+	IsLoading    bool
+	LastLoadTime time.Time // Used to throttle requests
 
 	Criteria = map[string]string{
 		"content":        "camouflage",
@@ -29,6 +33,17 @@ var (
 )
 
 func OnRequestData() {
+	if IsLoading {
+		return
+	}
+	IsLoading = true
+	LastLoadTime = time.Now()
+
+	defer func() {
+		IsLoading = false
+		g.Update()
+	}()
+
 	snapshot := make(map[string]string, len(Criteria))
 	for k, v := range Criteria {
 		snapshot[k] = v
@@ -57,7 +72,43 @@ func OnRequestData() {
 	}
 
 	FetchedPosts = append(FetchedPosts, result.Data.List...)
-	g.Update()
+}
+
+func LoadNextPage() {
+	if IsLoading {
+		return
+	}
+	IsLoading = true
+	LastLoadTime = time.Now()
+
+	defer func() {
+		IsLoading = false
+		g.Update()
+	}()
+
+	snapshot := make(map[string]string, len(Criteria))
+	for k, v := range Criteria {
+		snapshot[k] = v
+	}
+
+	myID := atomic.AddInt64(&currentRequestID, 1)
+	fmt.Printf("Loading more posts (page %s)...\n", snapshot["page"])
+
+	result, err := GetFeed(Criteria)
+	if err != nil {
+		fmt.Println("Error fetching feed:", err)
+		return
+	}
+
+	if atomic.LoadInt64(&currentRequestID) != myID {
+		return
+	}
+
+	if result == nil || len(result.Data.List) == 0 {
+		return
+	}
+
+	FetchedPosts = append(FetchedPosts, result.Data.List...)
 }
 
 func OnRequestHead() {

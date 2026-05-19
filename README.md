@@ -16,7 +16,7 @@ A simple tool to browse and download WarThunder camo skins.
 
 - [ ] Display if skin is already downloaded
 - [ ] More detailed info about downloading skins (e.g. progress bar, estimated time, etc.)
-- [ ] Infinite scrolling
+- [x] Infinite scrolling
 - [ ] Selecting which skin to download if multiple are found
 
 ### Skins Manager
@@ -27,7 +27,7 @@ A simple tool to browse and download WarThunder camo skins.
 
 ### Other
 
-- [ ] Support for unqiue icons (e.g. nation icons, partner icons, etc.)
+- [x] Support for unqiue icons (e.g. nation icons, partner icons, etc.)
 - [ ] Sights and sounds support
 
 ## Usage

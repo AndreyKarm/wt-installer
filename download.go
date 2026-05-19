@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	imgui "github.com/AllenDang/cimgui-go/imgui"
 	g "github.com/AllenDang/giu"
 )
 
@@ -22,6 +23,15 @@ var (
 	selectedImagePost  *wtlive.Post
 	selectedImageIndex int
 	showImageModal     bool
+
+	pixelsToEnd           float32
+	pixelsToLoadThreshold int = 500
+	scrollToTop           bool
+)
+
+const (
+	ImageSizeMultiplier     = 0.5
+	ViewImageSizeMultiplier = 1.5
 )
 
 func DownloadPage() []g.Widget {
@@ -45,13 +55,13 @@ func DownloadPage() []g.Widget {
 			g.Label("Search"),
 			g.InputText(&searchInput).
 				Hint("e.g. historical ussr").
-				Size(240),
+				Size(400),
 			g.Custom(func() {
 				if g.IsKeyPressed(g.KeyEnter) && searchInput != "" {
 					onSearch()
 				}
 			}),
-			g.Label(wtlive.WordsToHashtags(searchInput)),
+			// g.Label(wtlive.WordsToHashtags(searchInput)),
 			g.Button("Search##searchbtn").OnClick(func() {
 				if searchInput == "" {
 					return
@@ -66,6 +76,8 @@ func DownloadPage() []g.Widget {
 				wtlive.Criteria["searchString"] = ""
 				currentPage = 0
 				wtlive.Criteria["page"] = "0"
+
+				scrollToTop = true
 				go wtlive.OnRequestData()
 			}),
 		),
@@ -75,6 +87,11 @@ func DownloadPage() []g.Widget {
 			g.Combo("", sortOptions[feedSort], sortOptions, &feedSort).
 				OnChange(func() {
 					wtlive.Criteria["sort"] = sortValues[sortOptions[feedSort]]
+
+					wtlive.Criteria["page"] = "0"
+					currentPage = 0
+
+					scrollToTop = true
 					go wtlive.OnRequestData()
 				}).Size(160),
 
@@ -84,8 +101,12 @@ func DownloadPage() []g.Widget {
 				wtlive.GetItems(filteredCountries), &countrySelected,
 			).OnChange(func() {
 				if int(countrySelected) < len(filteredCountries) {
-					wtlive.Criteria["vehicleCountry"] =
-						filteredCountries[countrySelected].Value
+					wtlive.Criteria["vehicleCountry"] = filteredCountries[countrySelected].Value
+
+					wtlive.Criteria["page"] = "0"
+					currentPage = 0
+
+					scrollToTop = true
 					go wtlive.OnRequestData()
 				}
 			}).Size(160),
@@ -101,6 +122,11 @@ func DownloadPage() []g.Widget {
 					wtlive.Criteria["vehicleClass"] = ""
 					vehicleSelected = 0
 					wtlive.Criteria["vehicle"] = ""
+
+					wtlive.Criteria["page"] = "0"
+					currentPage = 0
+
+					scrollToTop = true
 					go wtlive.OnRequestData()
 				}
 			}).Size(160),
@@ -111,10 +137,14 @@ func DownloadPage() []g.Widget {
 				wtlive.GetItems(filteredClasses), &classSelected,
 			).OnChange(func() {
 				if int(classSelected) < len(filteredClasses) {
-					wtlive.Criteria["vehicleClass"] =
-						filteredClasses[classSelected].Value
-					vehicleSelected = 0
+					wtlive.Criteria["vehicleClass"] = filteredClasses[classSelected].Value
 					wtlive.Criteria["vehicle"] = ""
+					vehicleSelected = 0
+
+					wtlive.Criteria["page"] = "0"
+					currentPage = 0
+
+					scrollToTop = true
 					go wtlive.OnRequestData()
 				}
 			}).Size(160),
@@ -125,38 +155,46 @@ func DownloadPage() []g.Widget {
 				wtlive.GetItems(filteredVehicles), &vehicleSelected,
 			).OnChange(func() {
 				if int(vehicleSelected) < len(filteredVehicles) {
-					wtlive.Criteria["vehicle"] =
-						filteredVehicles[vehicleSelected].Value
+					wtlive.Criteria["vehicle"] = filteredVehicles[vehicleSelected].Value
+
+					wtlive.Criteria["page"] = "0"
+					currentPage = 0
+
+					scrollToTop = true
 					go wtlive.OnRequestData()
 				}
 			}).Size(160).Filter(true),
 		),
 
 		g.Separator(),
-		g.Row(
-			g.Button("< Prev").OnClick(func() {
-				if currentPage > 0 {
-					currentPage--
+		g.Child().Layout(
+			g.Custom(func() {
+				if scrollToTop {
+					imgui.SetScrollYFloat(0)
+					scrollToTop = false
+				}
+				y := imgui.ScrollY()
+				maxY := imgui.ScrollMaxY()
+				pixelsToEnd = maxY - y
+
+				if maxY > 0 && pixelsToEnd < 500 && !wtlive.IsLoading && time.Since(wtlive.LastLoadTime) > 2*time.Second {
+					currentPage++
 					wtlive.Criteria["page"] = fmt.Sprintf("%d", currentPage)
-					go wtlive.OnRequestData()
+					go wtlive.LoadNextPage()
 				}
 			}),
-			g.Label(fmt.Sprintf("Page %d", currentPage+1)),
-			g.Button("Next >").OnClick(func() {
-				currentPage++
-				wtlive.Criteria["page"] = fmt.Sprintf("%d", currentPage)
-				go wtlive.OnRequestData()
+			g.Column(PostWidget()...),
+			g.Custom(func() {
+				if wtlive.IsLoading && len(wtlive.FetchedPosts) > 0 {
+					g.Label("Loading more posts...").Build()
+				}
 			}),
-		),
-		g.Child().Layout(
-			g.Column(DownloadSkin()...),
 		),
 	}
 }
 
-func DownloadSkin() []g.Widget {
+func PostWidget() []g.Widget {
 	var widgets []g.Widget
-	const ImageSizeMultiplier = 0.5
 
 	for i := range wtlive.FetchedPosts {
 		post := wtlive.FetchedPosts[i]
@@ -202,7 +240,7 @@ func DownloadSkin() []g.Widget {
 				g.Align(g.AlignRight).To(
 					g.Button("Link").OnClick(func() {
 						g.OpenURL(fmt.Sprintf(
-							"%d/post/%d/%d/",
+							"%s/post/%v/%s/\n",
 							wtlive.BaseURL,
 							post.LangGroup,
 							wtlive.Lang,
@@ -255,29 +293,41 @@ func DownloadSkin() []g.Widget {
 			colItems = append(colItems, g.Separator(), g.Column(tagRows...))
 		}
 
+		var imgWidth, imgHeight = post.Images[0].Width, post.Images[0].Height
+		const diff float32 = (384.0 / 600.0) * ImageSizeMultiplier
+		const fallBackWidth, fallBackHeight float32 = 600.0 * diff, 400.0 * diff
+
 		widgets = append(widgets, g.Row(
 			g.ImageWithURL(post.Images[0].Src).
 				Timeout(5*time.Second).
 				Size(
-					float32(post.Images[0].Width)*ImageSizeMultiplier,
-					float32(post.Images[0].Height)*ImageSizeMultiplier,
+					float32(imgWidth)*ImageSizeMultiplier,
+					float32(imgHeight)*ImageSizeMultiplier,
 				).
 				OnClick(func() {
-					g.OpenPopup(fmt.Sprintf("Images %d", post.ID))
+					g.OpenPopup(fmt.Sprintf("Images##img%d", post.ID))
 				}).
 				LayoutForLoading(
-					g.Image(FallbackTex).Size(100, 100),
+					g.Image(FallbackTex).Size(fallBackWidth, fallBackHeight),
 				).
 				LayoutForFailure(
-					g.Image(FallbackTex).Size(100, 100),
+					g.Image(FallbackTex).Size(fallBackWidth, fallBackHeight),
 				),
-			g.PopupModal(fmt.Sprintf("Images %d", post.ID)).Layout(
+			g.PopupModal(fmt.Sprintf("Images##img%d", post.ID)).Layout(
 				g.Custom(func() {
 					if g.IsKeyPressed(g.KeyEscape) {
 						g.CloseCurrentPopup()
 					}
 				}),
-				g.Column(GetImagesFromPost(&post)...),
+				g.Child().
+					Size(
+						float32(imgWidth)*ViewImageSizeMultiplier,
+						float32(imgHeight)*ViewImageSizeMultiplier,
+					).
+					Layout(
+						g.Column(GetImagesFromPost(&post)...),
+					),
+				// g.Column(GetImagesFromPost(&post)...),
 				g.Button("Close##closeimg").OnClick(func() {
 					g.CloseCurrentPopup()
 				}),
@@ -292,13 +342,12 @@ func DownloadSkin() []g.Widget {
 
 func GetImagesFromPost(post *wtlive.Post) []g.Widget {
 	var widgets []g.Widget
-	const ImageSizeMultiplier = 1
 
 	for i, img := range post.Images {
 		widgets = append(widgets, g.ImageWithURL(img.Src).
 			Size(
-				float32(img.Width)*ImageSizeMultiplier,
-				float32(img.Height)*ImageSizeMultiplier,
+				float32(img.Width)*ViewImageSizeMultiplier,
+				float32(img.Height)*ViewImageSizeMultiplier,
 			).
 			OnClick(func() {
 				selectedImagePost = post
@@ -313,7 +362,8 @@ func GetImagesFromPost(post *wtlive.Post) []g.Widget {
 
 func onSearch() {
 	wtlive.Criteria["searchString"] = wtlive.WordsToHashtags(searchInput)
-	currentPage = 0
 	wtlive.Criteria["page"] = "0"
+	currentPage = 0
+	scrollToTop = true
 	go wtlive.OnRequestData()
 }

@@ -29,3 +29,4 @@ rsrc.syso
 *.exe
 /temp
 /config.json
+*.rar
