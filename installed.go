@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	g "github.com/AllenDang/giu"
 )
@@ -13,6 +14,7 @@ import (
 var (
 	skinToDelete    string
 	openDeletePopup bool
+	searchInput     string
 )
 
 func InstalledPage() []g.Widget {
@@ -31,6 +33,8 @@ func InstalledPage() []g.Widget {
 		)
 	}
 
+	searchTerm := strings.ToLower(searchInput)
+
 	rows := []*g.TreeTableRowWidget{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -38,6 +42,11 @@ func InstalledPage() []g.Widget {
 		}
 
 		name := entry.Name()
+
+		if searchTerm != "" && !strings.Contains(strings.ToLower(name), searchTerm) {
+			continue
+		}
+
 		directory := filepath.Join(config.UserSkins, name)
 
 		rows = append(rows, g.TreeTableRow(
@@ -55,6 +64,12 @@ func InstalledPage() []g.Widget {
 	}
 
 	return []g.Widget{
+		g.Row(
+			g.Label("Search"),
+			g.InputText(&searchInput).
+				Size(400),
+		),
+
 		g.TreeTable().
 			Columns(g.TableColumn("Name")).
 			Rows(

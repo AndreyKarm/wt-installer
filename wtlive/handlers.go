@@ -132,11 +132,3 @@ func OpenSkin(id int) {
 	fmt.Printf("Opening: %s\n", url)
 	g.OpenURL(url)
 }
-
-func OnCamoClick(name string) {
-	fmt.Printf("Selected camo: %s\n", name)
-}
-
-func OnInputRequest(input string) {
-	fmt.Printf("Input: %s\n", input)
-}

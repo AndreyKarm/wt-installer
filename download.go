@@ -13,7 +13,7 @@ import (
 
 var (
 	currentPage     int32 = 0
-	searchInput     string
+	hashtagInput    string
 	feedSort        int32
 	countrySelected int32
 	typeSelected    int32
@@ -53,26 +53,26 @@ func DownloadPage() []g.Widget {
 	return []g.Widget{
 		g.Row(
 			g.Label("Search"),
-			g.InputText(&searchInput).
+			g.InputText(&hashtagInput).
 				Hint("e.g. historical ussr").
 				Size(400),
 			g.Custom(func() {
-				if g.IsKeyPressed(g.KeyEnter) && searchInput != "" {
+				if g.IsKeyPressed(g.KeyEnter) && hashtagInput != "" {
 					onSearch()
 				}
 			}),
 			// g.Label(wtlive.WordsToHashtags(searchInput)),
 			g.Button("Search##searchbtn").OnClick(func() {
-				if searchInput == "" {
+				if hashtagInput == "" {
 					return
 				}
 				onSearch()
 			}),
 			g.Button("Clear##clearbtn").OnClick(func() {
-				if searchInput == "" {
+				if hashtagInput == "" {
 					return
 				}
-				searchInput = ""
+				hashtagInput = ""
 				wtlive.Criteria["searchString"] = ""
 				currentPage = 0
 				wtlive.Criteria["page"] = "0"
@@ -217,7 +217,8 @@ func PostWidget() []g.Widget {
 					g.Button(post.Author.Nickname).
 						OnClick(func() {
 							g.OpenURL(fmt.Sprintf(
-								"https://live.warthunder.com/user/%d",
+								"%s/user/%d",
+								wtlive.BaseURL,
 								post.Author.ID,
 							))
 						}),
@@ -276,7 +277,7 @@ func PostWidget() []g.Widget {
 
 				btn := g.Button(fmt.Sprintf("%s##tag%d_%d", t, post.ID, j)).
 					OnClick(func() {
-						searchInput = strings.TrimPrefix(t, "#")
+						hashtagInput = strings.TrimPrefix(t, "#")
 						wtlive.Criteria["searchString"] = t
 						currentPage = 0
 						wtlive.Criteria["page"] = "0"
@@ -361,7 +362,7 @@ func GetImagesFromPost(post *wtlive.Post) []g.Widget {
 }
 
 func onSearch() {
-	wtlive.Criteria["searchString"] = wtlive.WordsToHashtags(searchInput)
+	wtlive.Criteria["searchString"] = wtlive.WordsToHashtags(hashtagInput)
 	wtlive.Criteria["page"] = "0"
 	currentPage = 0
 	scrollToTop = true

@@ -21,7 +21,7 @@ A simple tool to browse and download WarThunder camo skins.
 
 ### Skins Manager
 
-- [ ] Search bar
+- [x] Search bar
 - [ ] Filter by skins (e.g. hashtags, vehicle, type, etc.)
 - [ ] Downloaded skins image previews and meta data
 

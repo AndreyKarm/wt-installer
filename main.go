@@ -13,35 +13,42 @@ import (
 var wnd *g.MasterWindow
 
 func main() {
-	// Set favicon
+	setupWindow()
+	loadMedia()
+	loadConfig()
+	fetchData()
+	wnd.Run(loop)
+}
+
+func loadMedia() {
 	if img, _, err := image.Decode(bytes.NewReader(faviconBytes)); err == nil {
 		rgba = g.ImageToRgba(img)
 	} else {
 		fmt.Println("Error decoding embedded favicon:", err)
 	}
 
+	if img, _, err := image.Decode(bytes.NewReader(fallbackBytes)); err == nil {
+		g.EnqueueNewTextureFromRgba(g.ImageToRgba(img), func(t *g.Texture) {
+			FallbackTex = t
+		})
+	}
+}
+
+func setupWindow() {
 	wnd = g.NewMasterWindow("WTLive Installer", 1200, 900, 0)
 
-	// Set font
 	g.Context.FontAtlas.SetDefaultFontSize(16)
 	g.Context.FontAtlas.SetDefaultFontFromBytes(skyquakeFontBytes, 16)
 
-	// Set icon
 	if rgba != nil {
 		g.EnqueueNewTextureFromRgba(rgba, func(t *g.Texture) {
 			tex = t
 		})
 		wnd.SetIcon(rgba)
 	}
+}
 
-	// Set fallback texture
-	if img, _, err := image.Decode(bytes.NewReader(fallbackBytes)); err == nil {
-		g.EnqueueNewTextureFromRgba(g.ImageToRgba(img), func(t *g.Texture) {
-			FallbackTex = t
-		})
-	}
-
-	// Load config
+func loadConfig() {
 	cfg, err := installer.LoadConfig()
 	if err != nil {
 		fmt.Println("Error loading config, using defaults:", err)
@@ -49,8 +56,9 @@ func main() {
 	}
 	installer.CurrentConfig = cfg
 	installer.SkinPathInput = installer.CurrentConfig.UserSkins
+}
 
-	// Fetch filters
+func fetchData() {
 	go func() {
 		data, err := wtlive.GetFiltersFromAPI(wtlive.Criteria)
 		if err != nil {
@@ -61,8 +69,5 @@ func main() {
 		g.Update()
 	}()
 
-	// Fetch data
 	go wtlive.OnRequestData()
-
-	wnd.Run(loop)
 }
