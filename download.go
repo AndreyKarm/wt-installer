@@ -20,6 +20,8 @@ var (
 	classSelected   int32
 	vehicleSelected int32
 
+	filterUniversal bool
+
 	selectedImagePost  *wtlive.Post
 	selectedImageIndex int
 	showImageModal     bool
@@ -76,6 +78,14 @@ func DownloadPage() []g.Widget {
 				wtlive.Criteria["searchString"] = ""
 				currentPage = 0
 				wtlive.Criteria["page"] = "0"
+
+				scrollToTop = true
+				go wtlive.OnRequestData()
+			}),
+
+			g.Checkbox("Filter Universal", &filterUniversal).OnChange(func() {
+				wtlive.Criteria["page"] = "0"
+				currentPage = 0
 
 				scrollToTop = true
 				go wtlive.OnRequestData()
@@ -202,6 +212,11 @@ func PostWidget() []g.Widget {
 			continue
 		}
 
+		isUniversal := strings.Contains(strings.ToLower(post.Description), "#universal")
+		if filterUniversal && isUniversal {
+			continue
+		}
+
 		status := installer.DownloadStatus[post.ID]
 		var statusString string
 		if status != "" {
@@ -222,9 +237,26 @@ func PostWidget() []g.Widget {
 								post.Author.ID,
 							))
 						}),
+					g.Align(g.AlignRight).To(
+						g.Row(
+							g.Button(fmt.Sprintf("%s##dl%d", statusString, post.ID)).
+								Size(150, 0).
+								OnClick(func() { installer.DownloadSkin(post) }),
+							g.Button(fmt.Sprintf("Link##link%d", post.ID)).
+								Size(100, 0).
+								OnClick(func() {
+									g.OpenURL(fmt.Sprintf(
+										"%s/post/%v/%s/\n",
+										wtlive.BaseURL,
+										post.LangGroup,
+										wtlive.Lang,
+									))
+								}),
+						),
+					),
 				),
 
-				g.Label(fmt.Sprintf("Date Created: %s", time.Unix(post.Created, 0).Format("01/02/2006 15:04:05"))),
+				g.Label(fmt.Sprintf("Date Created: %s", time.Unix(post.Created, 0).Format("02/01/2005 15:04:05"))),
 
 				g.Label(fmt.Sprintf(
 					"Downloads: %v. Likes: %v. Views: %v",
@@ -232,22 +264,6 @@ func PostWidget() []g.Widget {
 					post.Likes,
 					post.Views,
 				)),
-			),
-
-			g.Row(
-				g.Button(fmt.Sprintf("%s##dl%d", statusString, post.ID)).
-					Size(100, 0).
-					OnClick(func() { installer.DownloadSkin(post) }),
-				g.Align(g.AlignRight).To(
-					g.Button("Link").OnClick(func() {
-						g.OpenURL(fmt.Sprintf(
-							"%s/post/%v/%s/\n",
-							wtlive.BaseURL,
-							post.LangGroup,
-							wtlive.Lang,
-						))
-					}).Size(100, 0),
-				),
 			),
 		}
 
@@ -322,8 +338,8 @@ func PostWidget() []g.Widget {
 				}),
 				g.Child().
 					Size(
-						float32(imgWidth)*ViewImageSizeMultiplier,
-						float32(imgHeight)*ViewImageSizeMultiplier,
+						(float32(imgWidth)*ViewImageSizeMultiplier)+16,
+						(float32(imgHeight)*ViewImageSizeMultiplier)+16,
 					).
 					Layout(
 						g.Column(GetImagesFromPost(&post)...),

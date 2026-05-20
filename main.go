@@ -13,8 +13,9 @@ import (
 var wnd *g.MasterWindow
 
 func main() {
-	setupWindow()
+	wnd = g.NewMasterWindow("WTLive Installer", 1200, 900, 0)
 	loadMedia()
+	setupWindow()
 	loadConfig()
 	fetchData()
 	wnd.Run(loop)
@@ -35,8 +36,6 @@ func loadMedia() {
 }
 
 func setupWindow() {
-	wnd = g.NewMasterWindow("WTLive Installer", 1200, 900, 0)
-
 	g.Context.FontAtlas.SetDefaultFontSize(16)
 	g.Context.FontAtlas.SetDefaultFontFromBytes(skyquakeFontBytes, 16)
 

@@ -5,16 +5,17 @@ import (
 	"strings"
 )
 
-var hashtagRe = regexp.MustCompile(`#\w+`)
+var hashtagRe = regexp.MustCompile(`class="WTL-Embed-Hashtag">(#\w+)</a>`)
 
 func ExtractHashtags(description string) []string {
-	matches := hashtagRe.FindAllString(description, -1)
+	matches := hashtagRe.FindAllStringSubmatch(description, -1)
 	seen := make(map[string]bool, len(matches))
 	result := make([]string, 0, len(matches))
 	for _, m := range matches {
-		if !seen[m] {
-			seen[m] = true
-			result = append(result, m)
+		tag := strings.ToLower(m[1])
+		if !seen[tag] {
+			seen[tag] = true
+			result = append(result, tag)
 		}
 	}
 	return result
