@@ -1,4 +1,4 @@
-package installer
+package main
 
 import (
 	"encoding/json"
@@ -7,11 +7,12 @@ import (
 
 type Config struct {
 	UserSkins string `json:"UserSkins"`
+	Cookies   string `json:"Cookies"`
 }
 
 var (
-	CurrentConfig *Config
 	SkinPathInput string
+	Cookies       string
 )
 
 const configName = "config.json"
@@ -19,6 +20,7 @@ const configName = "config.json"
 func GetDefaultConfig() *Config {
 	return &Config{
 		UserSkins: "C:/Program Files (x86)/Steam/steamapps/common/War Thunder/UserSkins",
+		Cookies:   "",
 	}
 }
 

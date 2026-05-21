@@ -1,4 +1,4 @@
-package wtlive
+package main
 
 import (
 	"bytes"
@@ -40,6 +40,12 @@ func GetFiltersFromAPI(fields map[string]string) (*ApiHeadResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", fmt.Sprintf("token=%s", cfg.Cookies))
 	req.Header.Set("Content-Type", contentType)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -81,6 +87,12 @@ func GetFeed(fields map[string]string) (*ApiFeedResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", fmt.Sprintf("token=%s", cfg.Cookies))
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 

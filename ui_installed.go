@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"liotom/installer/installer"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +19,7 @@ var (
 func InstalledPage() []g.Widget {
 	var widgets []g.Widget
 
-	config, err := installer.LoadConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		return append(widgets, g.Label(fmt.Sprintf("Config error: %v", err)))
 	}
@@ -87,7 +86,7 @@ func InstalledPage() []g.Widget {
 			g.Label("Are you sure you want to delete?"),
 			g.Row(
 				g.Button("Yes").OnClick(func() {
-					installer.DeleteSkin(skinToDelete)
+					DeleteSkin(skinToDelete)
 					g.CloseCurrentPopup()
 				}),
 				g.Button("No").OnClick(func() { g.CloseCurrentPopup() }),

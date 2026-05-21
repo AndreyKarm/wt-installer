@@ -1,4 +1,4 @@
-package wtlive
+package main
 
 // Feed types
 type ApiFeedResponse struct {

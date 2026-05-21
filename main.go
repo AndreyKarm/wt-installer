@@ -4,13 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"liotom/installer/installer"
-	"liotom/installer/wtlive"
 
 	g "github.com/AllenDang/giu"
 )
-
-var wnd *g.MasterWindow
 
 func main() {
 	wnd = g.NewMasterWindow("WTLive Installer", 1200, 900, 0)
@@ -48,25 +44,25 @@ func setupWindow() {
 }
 
 func loadConfig() {
-	cfg, err := installer.LoadConfig()
+	cfg, err := LoadConfig()
 	if err != nil {
 		fmt.Println("Error loading config, using defaults:", err)
-		cfg = installer.GetDefaultConfig()
+		cfg = GetDefaultConfig()
 	}
-	installer.CurrentConfig = cfg
-	installer.SkinPathInput = installer.CurrentConfig.UserSkins
+	CurrentConfig = cfg
+	SkinPathInput = CurrentConfig.UserSkins
 }
 
 func fetchData() {
 	go func() {
-		data, err := wtlive.GetFiltersFromAPI(wtlive.Criteria)
+		data, err := GetFiltersFromAPI(Criteria)
 		if err != nil {
 			fmt.Println("Error fetching filters:", err)
 			return
 		}
-		wtlive.Filters = *data
+		Filters = *data
 		g.Update()
 	}()
 
-	go wtlive.OnRequestData()
+	go OnRequestData()
 }
