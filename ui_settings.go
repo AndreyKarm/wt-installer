@@ -21,6 +21,7 @@ func SettingsPage() []g.Widget {
 
 		g.Button("Save Settings").OnClick(func() {
 			CurrentConfig.UserSkins = SkinPathInput
+			CurrentConfig.Cookies = Cookies
 			if err := SaveConfig(CurrentConfig); err != nil {
 				fmt.Println("Error saving config:", err)
 			} else {

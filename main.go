@@ -51,6 +51,7 @@ func loadConfig() {
 	}
 	CurrentConfig = cfg
 	SkinPathInput = CurrentConfig.UserSkins
+	Cookies = CurrentConfig.Cookies
 }
 
 func fetchData() {
