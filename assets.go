@@ -1,19 +1,6 @@
 package main
 
-import (
-	_ "embed"
-	"image"
-	_ "image/png"
+import _ "embed"
 
-	"fyne.io/fyne/v2"
-)
-
-var (
-	rgba *image.RGBA
-	tex  *image.RGBA
-)
-
-//go:embed media/icon.png
+//go:embed media/icon.ico
 var iconBytes []byte
-
-var IconResource = fyne.NewStaticResource("icon.png", iconBytes)

@@ -2,48 +2,54 @@ package main
 
 import (
 	"fmt"
+	"os"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/systray"
 )
 
 var AutoStartEnabled bool
 
 func main() {
-	App := app.New()
-	App.SetIcon(IconResource)
+	systray.Run(onReady, onExit)
+}
 
-	desk, ok := App.(desktop.App)
-	if !ok {
-		fmt.Println("This app is not supported on this platform")
-		return
-	}
+func onReady() {
+	systray.SetIcon(iconBytes)
+	systray.SetTooltip(appName)
 
 	AutoStartEnabled = getAutoStartEnabled()
 
-	var trayMenu *fyne.Menu
-
-	autoStartItem := fyne.NewMenuItem("Auto-start", nil)
-	autoStartItem.Checked = AutoStartEnabled
-	autoStartItem.Action = func() {
-		AutoStartEnabled = !AutoStartEnabled
-		if err := setAutoStart(AutoStartEnabled); err != nil {
-			fmt.Printf("Error toggling auto-start: %v\n", err)
-			AutoStartEnabled = !AutoStartEnabled
-		}
-		autoStartItem.Checked = AutoStartEnabled
-		trayMenu.Refresh()
-	}
-
-	trayMenu = fyne.NewMenu(appName, autoStartItem)
-	desk.SetSystemTrayMenu(trayMenu)
-
-	App.Lifecycle().SetOnStarted(func() {
-		desk.SetSystemTrayIcon(IconResource)
-	})
+	autoStartItem := systray.AddMenuItemCheckbox(
+		"Auto-start",
+		"Toggle auto-start on Windows login",
+		AutoStartEnabled,
+	)
+	systray.AddSeparator()
+	quitItem := systray.AddMenuItem("Quit", "Quit "+appName)
 
 	go startServer()
 
-	App.Run()
+	go func() {
+		for {
+			select {
+			case <-autoStartItem.ClickedCh:
+				AutoStartEnabled = !AutoStartEnabled
+				if err := setAutoStart(AutoStartEnabled); err != nil {
+					fmt.Printf("Error toggling auto-start: %v\n", err)
+					AutoStartEnabled = !AutoStartEnabled
+				}
+				if AutoStartEnabled {
+					autoStartItem.Check()
+				} else {
+					autoStartItem.Uncheck()
+				}
+			case <-quitItem.ClickedCh:
+				systray.Quit()
+			}
+		}
+	}()
+}
+
+func onExit() {
+	os.Exit(0)
 }
