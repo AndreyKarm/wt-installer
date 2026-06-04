@@ -1,69 +1,49 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"image"
 
-	g "github.com/AllenDang/giu"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/driver/desktop"
 )
 
+var AutoStartEnabled bool
+
 func main() {
-	wnd = g.NewMasterWindow("WTLive Installer", 1200, 900, 0)
-	loadMedia()
-	setupWindow()
-	loadConfig()
-	fetchData()
-	wnd.Run(loop)
-}
+	App := app.New()
+	App.SetIcon(FaviconResource)
 
-func loadMedia() {
-	if img, _, err := image.Decode(bytes.NewReader(faviconBytes)); err == nil {
-		rgba = g.ImageToRgba(img)
-	} else {
-		fmt.Println("Error decoding embedded favicon:", err)
+	desk, ok := App.(desktop.App)
+	if !ok {
+		fmt.Println("This app is not supported on this platform")
+		return
 	}
 
-	if img, _, err := image.Decode(bytes.NewReader(fallbackBytes)); err == nil {
-		g.EnqueueNewTextureFromRgba(g.ImageToRgba(img), func(t *g.Texture) {
-			FallbackTex = t
-		})
-	}
-}
+	AutoStartEnabled = getAutoStartEnabled()
 
-func setupWindow() {
-	g.Context.FontAtlas.SetDefaultFontSize(16)
-	g.Context.FontAtlas.SetDefaultFontFromBytes(skyquakeFontBytes, 16)
+	var trayMenu *fyne.Menu
 
-	if rgba != nil {
-		g.EnqueueNewTextureFromRgba(rgba, func(t *g.Texture) {
-			tex = t
-		})
-		wnd.SetIcon(rgba)
-	}
-}
-
-func loadConfig() {
-	cfg, err := LoadConfig()
-	if err != nil {
-		fmt.Println("Error loading config, using defaults:", err)
-		cfg = GetDefaultConfig()
-	}
-	CurrentConfig = cfg
-	SkinPathInput = CurrentConfig.UserSkins
-	Cookies = CurrentConfig.Cookies
-}
-
-func fetchData() {
-	go func() {
-		data, err := GetFiltersFromAPI(Criteria)
-		if err != nil {
-			fmt.Println("Error fetching filters:", err)
-			return
+	autoStartItem := fyne.NewMenuItem("Auto-start", nil)
+	autoStartItem.Checked = AutoStartEnabled
+	autoStartItem.Action = func() {
+		AutoStartEnabled = !AutoStartEnabled
+		if err := setAutoStart(AutoStartEnabled); err != nil {
+			fmt.Printf("Error toggling auto-start: %v\n", err)
+			AutoStartEnabled = !AutoStartEnabled
 		}
-		Filters = *data
-		g.Update()
-	}()
+		autoStartItem.Checked = AutoStartEnabled
+		trayMenu.Refresh()
+	}
 
-	go OnRequestData()
+	trayMenu = fyne.NewMenu(appName, autoStartItem)
+	desk.SetSystemTrayMenu(trayMenu)
+
+	App.Lifecycle().SetOnStarted(func() {
+		desk.SetSystemTrayIcon(FaviconResource)
+	})
+
+	go startServer()
+
+	App.Run()
 }

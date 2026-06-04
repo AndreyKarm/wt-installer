@@ -5,20 +5,15 @@ import (
 	"image"
 	_ "image/png"
 
-	g "github.com/AllenDang/giu"
+	"fyne.io/fyne/v2"
 )
 
 var (
-	rgba        *image.RGBA
-	tex         *g.Texture
-	FallbackTex *g.Texture
+	rgba *image.RGBA
+	tex  *image.RGBA
 )
-
-//go:embed media/skyquake.ttf
-var skyquakeFontBytes []byte
 
 //go:embed media/favicon.png
 var faviconBytes []byte
 
-//go:embed media/fallback.png
-var fallbackBytes []byte
+var FaviconResource = fyne.NewStaticResource("favicon.png", faviconBytes)
