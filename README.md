@@ -1,40 +1,20 @@
-# WarThunder Camo Browser
+# WarThunder Installer
 
-A simple tool to browse and download WarThunder camo skins.
-
-## Features
-
-- Browse and download camo skins from the WarThunder LIVE
-- Filter by country, type, class, and vehicle
-- Search by vehicle name and hashtag
-- Sort by recent, popular, commented, or downloaded
-- Manage your downloaded skins
+Tool to download skins from WarThunder's official website into the game's skins folder directly from the browser.
 
 ## Planned features
 
-### Skin Downloader
-
 - [ ] Display if skin is already downloaded
-- [ ] More detailed info about downloading skins (e.g. progress bar, estimated time, etc.)
-- [x] Infinite scrolling
 - [ ] Selecting which skin to download if multiple are found
-
-### Skins Manager
-
-- [x] Search bar
-- [ ] Filter by skins (e.g. hashtags, vehicle, type, etc.)
-- [ ] Downloaded skins image previews and meta data
-
-### Other
-
-- [x] Support for unqiue icons (e.g. nation icons, partner icons, etc.)
+- [ ] Search bar
 - [ ] Sights and sounds support
 
 ## Usage
 
 1. Download the latest release from the [releases page](https://github.com/AndreyKarm/wt-installer/releases).
-2. Extract the archive to a folder on your computer.
+2. Place the executable file in a folder with the game (e.g., `C:\Games\WarThunder\WT Installer.exe`).
 3. Run the executable file.
+4. In the tray select "Auto-start" to start the server automatically when pc starts.
 
 ## Building from source
 

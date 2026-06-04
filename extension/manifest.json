@@ -2,14 +2,24 @@
   "manifest_version": 3,
   "name": "WT Local Downloader",
   "version": "1.0",
-  "description": "Adds a 'Download locally' button to War Thunder Live posts",
+  "description": "Adds a 'Download localy' button to War Thunder Live posts",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "wt-local-downloader@extension",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"],
+        "optional": []
+      }
+    }
+  },
   "host_permissions": [
     "https://live.warthunder.com/*",
     "http://localhost:4316/*"
   ],
 
   "icons": {
-    "48": "assets/icon.ico"
+    "128": "assets/128.png"
   },
 
   "content_scripts": [

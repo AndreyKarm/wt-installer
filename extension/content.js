@@ -18,12 +18,12 @@ function addButton(post) {
 
   const btn = document.createElement("a");
   btn.className = `downloads button_item ${BTN_MARKER}`;
-  btn.title = "Download localy";
+  btn.title = "Download locally";
   btn.href = "#";
 
   const label = document.createElement("span");
   label.className = "num";
-  label.textContent = "Download localy";
+  label.textContent = "Download locally";
   btn.appendChild(label);
 
   btn.addEventListener("click", async (e) => {
@@ -59,7 +59,7 @@ function addButton(post) {
     }
 
     setTimeout(() => {
-      label.textContent = "Download localy";
+      label.textContent = "Download locally";
       btn.style.color = "";
     }, 2000);
   });
