@@ -12,7 +12,7 @@ var AutoStartEnabled bool
 
 func main() {
 	App := app.New()
-	App.SetIcon(FaviconResource)
+	App.SetIcon(IconResource)
 
 	desk, ok := App.(desktop.App)
 	if !ok {
@@ -40,7 +40,7 @@ func main() {
 	desk.SetSystemTrayMenu(trayMenu)
 
 	App.Lifecycle().SetOnStarted(func() {
-		desk.SetSystemTrayIcon(FaviconResource)
+		desk.SetSystemTrayIcon(IconResource)
 	})
 
 	go startServer()

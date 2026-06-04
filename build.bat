@@ -8,15 +8,15 @@ if exist rsrc.syso del rsrc.syso
 echo Cleaning old executable...
 if exist "%EXE_NAME%" del "%EXE_NAME%"
 
-echo Checking for favicon...
-if not exist media\favicon.ico (
-  echo ERROR: media\favicon.ico not found!
+echo Checking for icon...
+if not exist media\icon.ico (
+  echo ERROR: media\icon.ico not found!
   pause
   exit /b 1
 )
 
-echo Generating resources from favicon...
-rsrc -ico media\favicon.ico -o rsrc.syso
+echo Generating resources from icon...
+rsrc -ico media\icon.ico -o rsrc.syso
 
 if %errorlevel% neq 0 (
   echo ERROR: rsrc generation failed.

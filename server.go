@@ -14,7 +14,8 @@ const (
 )
 
 type PostRequest struct {
-	FileUrl string `json:"fileUrl"`
+	FileUrl  string `json:"fileUrl"`
+	FileName string `json:"fileName"`
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

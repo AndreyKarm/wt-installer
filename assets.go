@@ -13,7 +13,7 @@ var (
 	tex  *image.RGBA
 )
 
-//go:embed media/favicon.png
-var faviconBytes []byte
+//go:embed media/icon.png
+var iconBytes []byte
 
-var FaviconResource = fyne.NewStaticResource("favicon.png", faviconBytes)
+var IconResource = fyne.NewStaticResource("icon.png", iconBytes)

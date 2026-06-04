@@ -17,7 +17,7 @@ func init() {
 	if err != nil {
 		panic(fmt.Errorf("failed to resolve executable path: %w", err))
 	}
-	GameDir = filepath.Dir(exe)
+	GameDir = filepath.Dir(exe) + "\\UserSkins"
 }
 
 func DownloadSkin(postId int, fileUrl string) error {

@@ -30,7 +30,7 @@ jobs:
         run: go install github.com/akavel/rsrc@latest
 
       - name: Generate icon resource
-        run: rsrc -ico media/favicon.ico -o rsrc.syso
+        run: rsrc -ico media/icon.ico -o rsrc.syso
 
       - name: Build
         env:
