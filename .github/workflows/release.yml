@@ -18,8 +18,13 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.3"
+          go-version: "1.26.4"
           cache: true
+
+      - name: Setup MinGW (CGO)
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
 
       - name: Install rsrc
         run: go install github.com/akavel/rsrc@latest
@@ -28,9 +33,12 @@ jobs:
         run: rsrc -ico media/favicon.ico -o rsrc.syso
 
       - name: Build
+        env:
+          CGO_ENABLED: "1"
+          CC: gcc
         run: >
           go build
-          -ldflags="-s -w -H=windowsgui -extldflags=-static"
+          -ldflags="-s -w -H=windowsgui"
           -o "WT Installer.exe" .
 
       - name: Upload Release Asset
