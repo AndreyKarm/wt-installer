@@ -22,6 +22,22 @@ body {
   line-height: 1.4;
 }
 
+a {
+  color: var(--wt-text-color);
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+div.row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .title {
   font-weight: 700;
   font-size: 1.2rem;

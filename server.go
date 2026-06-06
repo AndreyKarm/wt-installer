@@ -12,7 +12,7 @@ import (
 
 const (
 	Port    = 4316
-	Version = "0.0.1"
+	Version = "0.0.2"
 )
 
 type PostRequest struct {
