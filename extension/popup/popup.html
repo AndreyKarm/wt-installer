@@ -20,17 +20,69 @@
 
     <hr class="divider" />
 
-    <button class="loc-btn" id="btn-camo">
+    <button class="loc-btn" id="btn-camo" type="button">
       <span>📁</span><span>Open Skins Folder</span>
     </button>
-    <button class="loc-btn" id="btn-installer">
+    <button class="loc-btn" id="btn-installer" type="button">
       <span>📁</span><span>Open Installer Folder</span>
     </button>
 
     <hr class="divider" />
 
-    <a href="https://github.com/AndreyKarm/wt-installer" style="display:flex; align-items:center;gap:0.25rem">
-      <img draggable="false" src="github.svg" alt="GitHub" class="logo" width="24" height="24" />
+    <div class="logs-section">
+      <div class="logs-header">
+        <button class="logs-toggle" id="btn-toggle-logs" type="button">
+          <span class="logs-arrow" id="logs-arrow">▶</span>
+          Logs
+        </button>
+        <div class="logs-actions" id="logs-actions" hidden>
+          <button
+            class="icon-btn"
+            id="btn-refresh-logs"
+            type="button"
+            title="Refresh"
+          >
+            ↻
+          </button>
+          <button
+            class="icon-btn"
+            id="btn-clear-logs"
+            type="button"
+            title="Clear"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <div id="logs-panel" hidden>
+        <div class="log-tabs">
+          <button class="log-tab active" data-tab="server" type="button">
+            Server
+          </button>
+          <button class="log-tab" data-tab="ext" type="button">
+            Extension
+          </button>
+        </div>
+        <div class="log-entries" id="log-entries">
+          <span class="log-empty">No logs yet.</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <a
+      href="https://github.com/AndreyKarm/wt-installer"
+      style="display: flex; align-items: center; gap: 0.25rem"
+    >
+      <img
+        draggable="false"
+        src="github.svg"
+        alt="GitHub"
+        class="logo"
+        width="24"
+        height="24"
+      />
       Project Page
     </a>
 

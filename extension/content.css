@@ -10,6 +10,11 @@
   --wt-text-color: #cecac3;
   --wt-text-color-muted: #a8a095;
   --wt-primary-color: #565757;
+
+  --wt-success-color: #4caf50;
+  --wt-error-color: #ef5350;
+  --wt-warn-color: #ffa726;
+  --wt-info-color: #42a5f5;
 }
 
 .wt-local-dl-spinner {
@@ -61,11 +66,11 @@
 }
 
 .wt-local-toast.success {
-  border-left-color: #4caf50;
+  border-left-color: var(--wt-success-color);
 }
 .wt-local-toast.error {
-  border-left-color: #f44336;
+  border-left-color: var(--wt-error-color);
 }
 .wt-local-toast.info {
-  border-left-color: #42a5f5;
+  border-left-color: var(--wt-info-color);
 }

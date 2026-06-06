@@ -3,22 +3,57 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"sync"
+	"time"
 )
 
-const (
-	Port    = 4316
-	Version = "0.0.2"
-)
+type LogEntry struct {
+	Time    string `json:"time"`
+	Message string `json:"message"`
+}
+
+type logCapture struct{ io.Writer }
 
 type PostRequest struct {
 	Type    string `json:"type"`
 	PostId  int    `json:"postId"`
 	FileUrl string `json:"fileUrl"`
+}
+
+const (
+	Port    = 4316
+	Version = "0.0.2"
+
+	maxLogEntries = 200
+)
+
+var (
+	logBuffer []LogEntry
+	logMu     sync.Mutex
+)
+
+func init() {
+	log.SetFlags(0)
+	log.SetOutput(&logCapture{Writer: log.Writer()})
+}
+
+func (lc *logCapture) Write(p []byte) (int, error) {
+	logMu.Lock()
+	logBuffer = append(logBuffer, LogEntry{
+		Time:    time.Now().Format("15:04:05"),
+		Message: string(p),
+	})
+	if len(logBuffer) > 200 {
+		logBuffer = logBuffer[1:]
+	}
+	logMu.Unlock()
+	return lc.Writer.Write(p)
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -119,16 +154,23 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 func startServer() {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/version", versionHandler)
 	mux.HandleFunc("/openfolder", openFolderHandler)
 	mux.HandleFunc("/download", downloadHandler)
+	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
+		logMu.Lock()
+		json.NewEncoder(w).Encode(logBuffer)
+		logMu.Unlock()
+	})
 
-	log.Printf("Server starting on localhost:%d", Port)
-	if err := http.ListenAndServe(
-		fmt.Sprintf(":%d", Port),
-		corsMiddleware(mux),
-	); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
-	}
+	mux.HandleFunc("/logs/clear", func(w http.ResponseWriter, r *http.Request) {
+		logMu.Lock()
+		logBuffer = nil
+		logMu.Unlock()
+		fmt.Fprint(w, "OK")
+	})
+
+	http.ListenAndServe(fmt.Sprintf(":%d", Port), corsMiddleware(mux))
 }

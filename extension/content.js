@@ -109,13 +109,13 @@ function addButton(post) {
       label.textContent = "Installed";
       btn.style.color = "#4caf50";
       showToast(`Skin installed for post #${postId}`, "success");
-      console.log(`[WT Local Downloader] Downloaded skin for post ${postId}`);
+      wtLog("info", `Downloaded skin for post ${postId}`);
     } else {
       label.textContent = "Failed";
       btn.style.color = "#f44336";
       const reason = result?.error ?? `HTTP ${result?.status}`;
       showToast(`Download failed for post #${postId}: ${reason}`, "error");
-      console.error("[WT Local Downloader] Failed for post", postId, reason);
+      wtLog("error", `Failed for post ${postId}: ${reason}`);
     }
 
     setTimeout(() => {
@@ -141,3 +141,16 @@ observer.observe(
   document.querySelector("#feedwrapper") ?? document.body,
   { childList: true, subtree: true }
 );
+
+// Logs
+function wtLog(level, ...args) {
+  const message = args.map(String).join(" ");
+  if (level === "error") console.error("[WT]", message);
+  else console.log("[WT]", message);
+  browser.runtime.sendMessage({
+    action: "wt_add_log",
+    level,
+    source: "content",
+    message,
+  }).catch(() => { });
+}

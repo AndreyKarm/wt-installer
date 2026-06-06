@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ func getExecutablePath() string {
 	ex, _ := os.Executable()
 	path := filepath.Clean(ex)
 	if strings.Contains(path, " ") {
-		return `"` + path + `"`
+		return fmt.Sprintf("\"%s\"", path)
 	}
 	return path
 }
