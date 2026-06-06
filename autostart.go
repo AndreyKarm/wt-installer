@@ -14,17 +14,16 @@ func getExecutablePath() string {
 	return filepath.ToSlash(ex)
 }
 
-func getAutoStart() (key registry.Key, err error) {
-	key, err = registry.OpenKey(
+func openAutoStartKey(access uint32) (registry.Key, error) {
+	return registry.OpenKey(
 		registry.CURRENT_USER,
 		`Software\Microsoft\Windows\CurrentVersion\Run`,
-		registry.QUERY_VALUE,
+		access,
 	)
-	return
 }
 
 func getAutoStartEnabled() bool {
-	key, err := getAutoStart()
+	key, err := openAutoStartKey(registry.QUERY_VALUE)
 	if err != nil {
 		return false
 	}
@@ -38,7 +37,7 @@ func getAutoStartEnabled() bool {
 }
 
 func setAutoStart(enable bool) error {
-	key, err := getAutoStart()
+	key, err := openAutoStartKey(registry.SET_VALUE)
 	if err != nil {
 		return err
 	}

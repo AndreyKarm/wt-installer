@@ -8,9 +8,27 @@ if exist rsrc.syso del rsrc.syso
 echo Cleaning old executable...
 if exist "%EXE_NAME%" del "%EXE_NAME%"
 
-echo Checking for icon...
-if not exist media\icon.ico (
-  echo ERROR: media\icon.ico not found!
+echo Checking for source PNG icon...
+if not exist media\icon.png (
+  echo ERROR: media\icon.png not found!
+  pause
+  exit /b 1
+)
+
+echo Checking for ImageMagick...
+where magick >nul 2>nul
+if %errorlevel% neq 0 (
+  echo ERROR: ImageMagick is not installed or not in PATH!
+  echo Run: winget install ImageMagick.ImageMagick
+  pause
+  exit /b 1
+)
+
+echo Converting PNG to multi-size ICO...
+magick media\icon.png -define icon:auto-resize=256,48,32,16 media\icon.ico
+
+if %errorlevel% neq 0 (
+  echo ERROR: ImageMagick conversion failed.
   pause
   exit /b 1
 )

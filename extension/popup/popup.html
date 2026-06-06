@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WT Local Downloader</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <p class="title">WT Local Downloader</p>
+
+    <div class="info-row">
+      <span class="info-label">Extension Version</span>
+      <span class="info-value" id="ext-version">–</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Server Version</span>
+      <span class="info-value" id="srv-version">...</span>
+    </div>
+
+    <hr class="divider" />
+
+    <button class="loc-btn" id="btn-camo">
+      <span>📁</span><span>Open Skins Folder</span>
+    </button>
+    <button class="loc-btn" id="btn-installer">
+      <span>📁</span><span>Open Installer Folder</span>
+    </button>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

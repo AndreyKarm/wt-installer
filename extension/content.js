@@ -1,11 +1,21 @@
+const EXT_VERSION = browser.runtime.getManifest().version;
 const POST_ATTR = "post_id";
 const BTN_MARKER = "local-dl-btn";
+const TYPE_MAP = {
+  camouflage: "camo",
+  // sight: "sight",
+};
 
 function addButton(post) {
   if (post.querySelector(`.${BTN_MARKER}`)) return;
 
-  const postId = post.getAttribute(POST_ATTR);
+  const postId = parseInt(post.getAttribute(POST_ATTR), 10);
   if (!postId) return;
+
+  const downloadType = Object.keys(TYPE_MAP).find((cls) =>
+    post.classList.contains(cls)
+  );
+  if (!downloadType) return;
 
   const leftButtons = post.querySelector(".bottom .buttons .left");
   if (!leftButtons) return;
@@ -28,6 +38,7 @@ function addButton(post) {
 
   btn.addEventListener("click", async (e) => {
     e.preventDefault();
+
     if (btn.dataset.pending) return;
 
     btn.dataset.pending = "true";
@@ -37,7 +48,8 @@ function addButton(post) {
     label.appendChild(spinner);
 
     const result = await browser.runtime.sendMessage({
-      type: "download_post",
+      action: "wt_install",
+      type: TYPE_MAP[downloadType],
       postId,
       fileUrl,
     });
@@ -48,6 +60,7 @@ function addButton(post) {
     if (result?.ok) {
       label.textContent = "Downloaded";
       btn.style.color = "#4caf50";
+      console.log(`[WT Local Downloader] Downloaded skin for post ${postId}`);
     } else {
       label.textContent = "Failed";
       btn.style.color = "#f44336";

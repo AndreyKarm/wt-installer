@@ -10,16 +10,7 @@ import (
 	"strings"
 )
 
-var GameDir string
-
-func init() {
-	exe, err := os.Executable()
-	if err != nil {
-		panic(fmt.Errorf("failed to resolve executable path: %w", err))
-	}
-	GameDir = filepath.Dir(exe) + "\\UserSkins"
-}
-
+// DownloadSkin downloads a skin from the given URL and extracts it to CamoDir
 func DownloadSkin(postId int, fileUrl string) error {
 	resp, err := http.Get(fileUrl)
 	if err != nil {
@@ -43,10 +34,10 @@ func DownloadSkin(postId int, fileUrl string) error {
 	if err = ExtractZip(tmpPath, fmt.Sprintf("wtskin-%d", postId)); err != nil {
 		return fmt.Errorf("Extract error for %d: %w", postId, err)
 	}
-
 	return nil
 }
 
+// ExtractZip extracts a zip file to the CamoDir directory
 func ExtractZip(src, fallbackName string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -55,9 +46,9 @@ func ExtractZip(src, fallbackName string) error {
 	defer r.Close()
 
 	root := detectZipRoot(r)
-	dest := GameDir
+	dest := CamoDir
 	if root == "" {
-		dest = filepath.Join(GameDir, fallbackName)
+		dest = filepath.Join(CamoDir, fallbackName)
 	}
 
 	cleanDest := filepath.Clean(dest)
@@ -71,7 +62,7 @@ func ExtractZip(src, fallbackName string) error {
 				cleanFpath,
 				cleanDest+string(os.PathSeparator),
 			) {
-			return fmt.Errorf("illegal path in archive: %s", f.Name)
+			return fmt.Errorf("Illegal path in archive: %s", f.Name)
 		}
 
 		if f.FileInfo().IsDir() {
@@ -111,6 +102,8 @@ func ExtractZip(src, fallbackName string) error {
 	return nil
 }
 
+// detectZipRoot returns the single top-level directory in a zip, or "" if
+// there are multiple (meaning files sit directly at the root).
 func detectZipRoot(r *zip.ReadCloser) string {
 	var root string
 	for _, f := range r.File {
@@ -125,9 +118,10 @@ func detectZipRoot(r *zip.ReadCloser) string {
 	return root
 }
 
+// DeleteSkin removes a skin folder from CamoDir by name.
 func DeleteSkin(name string) {
 	go func() {
-		path := filepath.Join(GameDir, name)
+		path := filepath.Join(CamoDir, name)
 		if err := os.RemoveAll(path); err != nil {
 			fmt.Printf("Delete error for %s: %v\n", name, err)
 			return
