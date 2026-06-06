@@ -39,6 +39,12 @@ jobs:
           -ldflags="-s -w -H=windowsgui"
           -o "WT Installer.exe" .
 
+      - name: Install UPX
+        run: choco install upx -y
+
+      - name: Compress executable
+        run: upx --best --lzma "WT Installer.exe"
+
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
