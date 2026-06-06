@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -11,7 +12,11 @@ const appName = "WT Installer Server"
 
 func getExecutablePath() string {
 	ex, _ := os.Executable()
-	return filepath.ToSlash(ex)
+	path := filepath.Clean(ex)
+	if strings.Contains(path, " ") {
+		return `"` + path + `"`
+	}
+	return path
 }
 
 func openAutoStartKey(access uint32) (registry.Key, error) {
