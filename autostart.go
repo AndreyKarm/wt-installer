@@ -13,7 +13,11 @@ const appName = "WT Installer Server"
 
 func getExecutablePath() string {
 	ex, _ := os.Executable()
-	path := filepath.Clean(ex)
+	return filepath.Clean(ex)
+}
+
+func getExecutablePathForRegistry() string {
+	path := getExecutablePath()
 	if strings.Contains(path, " ") {
 		return fmt.Sprintf("\"%s\"", path)
 	}
@@ -39,7 +43,7 @@ func getAutoStartEnabled() bool {
 	if err != nil {
 		return false
 	}
-	return val == getExecutablePath()
+	return val == getExecutablePathForRegistry()
 }
 
 func setAutoStart(enable bool) error {
@@ -50,7 +54,7 @@ func setAutoStart(enable bool) error {
 	defer key.Close()
 
 	if enable {
-		return key.SetStringValue(appName, getExecutablePath())
+		return key.SetStringValue(appName, getExecutablePathForRegistry())
 	}
 	return key.DeleteValue(appName)
 }
