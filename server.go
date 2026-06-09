@@ -79,6 +79,7 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 
 func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		log.Printf("Method not allowed: %s\n", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -88,6 +89,7 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	switch target {
 	case "camo":
 		if CamoDir == "" {
+			log.Printf("Camo folder not found\n")
 			http.Error(w, "Camo folder not found", http.StatusInternalServerError)
 			return
 		}
@@ -95,6 +97,7 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	case "sight":
 		sightDirs, err := GetSightDirs()
 		if err != nil || len(sightDirs) == 0 {
+			log.Printf("Sight folder not found: %v\n", err)
 			http.Error(w, "Sight folder not found", http.StatusInternalServerError)
 			return
 		}
@@ -102,6 +105,7 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	case "installer":
 		path = filepath.Dir(getExecutablePath())
 	default:
+		log.Printf("Invalid target: %s\n", target)
 		http.Error(w, "Invalid target", http.StatusBadRequest)
 		return
 	}
@@ -133,7 +137,7 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	var body PostRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		fmt.Fprintf(w, "Invalid JSON body: %v", err)
+		log.Printf("Invalid JSON body: %v\n", err)
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
@@ -144,6 +148,7 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	switch body.Type {
 	case "camo":
 		if err := DownloadSkin(body.PostId, body.FileUrl); err != nil {
+			log.Printf("DownloadSkin error: %v\n", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -153,6 +158,7 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	case "sight":
 		if err := DownloadSight(body.PostId, body.FileUrl); err != nil {
+			log.Printf("DownloadSight error: %v\n", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -160,6 +166,7 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Installed")
 
 	default:
+		log.Printf("Invalid type: %s\n", body.Type)
 		http.Error(w, "Invalid type", http.StatusBadRequest)
 		return
 	}
@@ -185,5 +192,7 @@ func startServer() {
 		fmt.Fprint(w, "OK")
 	})
 
-	http.ListenAndServe(fmt.Sprintf(":%d", Port), corsMiddleware(mux))
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", Port), corsMiddleware(mux)); err != nil {
+		log.Printf("Server error: %v", err)
+	}
 }

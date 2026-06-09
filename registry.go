@@ -37,20 +37,23 @@ var steamRegistryPath = RegistryPath{
 const warThunderSteamAppID = "236390"
 
 func init() {
-	dir, err := findGameDir()
+	dir, err := FindGameDir()
 	if err != nil {
-		log.Fatalf("Could not find War Thunder install path: %v", err)
+		showFatalDialog("War Thunder not found", err.Error())
+		os.Exit(1)
 	}
 	GameDir = dir
 	CamoDir = filepath.Join(GameDir, "UserSkins")
+
 	SightDirs, err = GetSightDirs()
 	if err != nil {
-		log.Fatalf("Could not find sight folders: %v", err)
+		log.Printf("Warning: could not find sight folders: %v", err)
 	}
+
 	log.Printf("Found War Thunder at: %s", GameDir)
 }
 
-func openRegistryValue(p RegistryPath) (string, error) {
+func OpenRegistryValue(p RegistryPath) (string, error) {
 	key, err := registry.OpenKey(p.Key, p.SubKey, registry.QUERY_VALUE)
 	if err != nil {
 		return "", err
@@ -60,8 +63,8 @@ func openRegistryValue(p RegistryPath) (string, error) {
 	return val, err
 }
 
-// parseVDFKV parses a single VDF line of the form "key"  "value"
-func parseVDFKV(line string) (key, val string) {
+// ParseVDFKV parses a single VDF line of the form "key"  "value"
+func ParseVDFKV(line string) (key, val string) {
 	line = strings.TrimSpace(line)
 	if len(line) == 0 || line[0] != '"' {
 		return "", ""
@@ -83,8 +86,8 @@ func parseVDFKV(line string) (key, val string) {
 	return key, val
 }
 
-// findSteamGamePath parses libraryfolders.vdf to locate War Thunder
-func findSteamGamePath(steamPath string) (string, error) {
+// FindSteamGamePath parses libraryfolders.vdf to locate War Thunder
+func FindSteamGamePath(steamPath string) (string, error) {
 	vdfPath := filepath.Join(steamPath, "steamapps", "libraryfolders.vdf")
 	data, err := os.ReadFile(vdfPath)
 	if err != nil {
@@ -109,7 +112,7 @@ func findSteamGamePath(steamPath string) (string, error) {
 			}
 			depth--
 		default:
-			key, val := parseVDFKV(line)
+			key, val := ParseVDFKV(line)
 			if key == "" {
 				continue
 			}
@@ -128,20 +131,22 @@ func findSteamGamePath(steamPath string) (string, error) {
 		}
 	}
 
+	log.Printf("War Thunder not found in any Steam library")
 	return "", fmt.Errorf("War Thunder not found in any Steam library")
 }
 
-func findGameDir() (string, error) {
+func FindGameDir() (string, error) {
 	// Installed via Gaijin Launcher
-	if gamePath, err := openRegistryValue(launcherRegistryPath); err == nil {
+	if gamePath, err := OpenRegistryValue(launcherRegistryPath); err == nil {
 		return gamePath, nil
 	}
 
 	// Installed via Steam
-	if steamPath, err := openRegistryValue(steamRegistryPath); err == nil {
-		return findSteamGamePath(steamPath)
+	if steamPath, err := OpenRegistryValue(steamRegistryPath); err == nil {
+		return FindSteamGamePath(steamPath)
 	}
 
+	log.Printf("War Thunder installation not found")
 	return "", fmt.Errorf("War Thunder installation not found")
 }
 
@@ -157,6 +162,7 @@ func GetSightDirs() ([]string, error) {
 	savesPath := GetSavesDirBase()
 	entries, err := os.ReadDir(savesPath)
 	if err != nil {
+		log.Printf("could not read Saves directory: %v\n", err)
 		return nil, fmt.Errorf("could not read Saves directory: %w", err)
 	}
 
@@ -166,7 +172,7 @@ func GetSightDirs() ([]string, error) {
 			continue
 		}
 		name := entry.Name()
-		if len(name) == 8 && isDigitsOnly(name) {
+		if isDigitsOnly(name) {
 			dirs = append(dirs, filepath.Join(
 				savesPath, name,
 				"production", "UserSights", "all_tanks",
@@ -174,10 +180,7 @@ func GetSightDirs() ([]string, error) {
 		}
 	}
 
-	if len(dirs) == 0 {
-		return nil, fmt.Errorf("no 8-digit save folders found in %s", savesPath)
-	}
-	fmt.Println(dirs)
+	log.Printf("Found %d sight folders in %s", len(dirs), savesPath)
 	return dirs, nil
 }
 

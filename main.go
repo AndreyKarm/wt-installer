@@ -5,11 +5,19 @@ import (
 	"os"
 
 	"fyne.io/systray"
+	"golang.org/x/sys/windows"
 )
 
 var AutoStartEnabled bool
 
 func main() {
+	mutex, err := windows.CreateMutex(nil, false, windows.StringToUTF16Ptr("WTInstallerServer"))
+	if err != nil || windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
+		showFatalDialog("Already running", "WT Installer Server is already running.")
+		os.Exit(1)
+	}
+	defer windows.CloseHandle(mutex)
+
 	systray.Run(onReady, onExit)
 }
 

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,12 +15,14 @@ import (
 func DownloadSkin(postId int, fileUrl string) error {
 	resp, err := http.Get(fileUrl)
 	if err != nil {
+		log.Printf("Download failed: %v\n", err)
 		return fmt.Errorf("Download failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	tmpFile, err := os.CreateTemp("", "wtskin-*.zip")
 	if err != nil {
+		log.Printf("Temp file error: %v\n", err)
 		return fmt.Errorf("Temp file error: %w", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -27,11 +30,13 @@ func DownloadSkin(postId int, fileUrl string) error {
 
 	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
 		tmpFile.Close()
+		log.Printf("Write error: %v\n", err)
 		return fmt.Errorf("Write error: %w", err)
 	}
 	tmpFile.Close()
 
 	if err = ExtractZip(tmpPath, CamoDir, fmt.Sprintf("wtskin-%d", postId), false); err != nil {
+		log.Printf("Extract error for %d: %v\n", postId, err)
 		return fmt.Errorf("Extract error for %d: %w", postId, err)
 	}
 	return nil
@@ -42,12 +47,14 @@ func DownloadSkin(postId int, fileUrl string) error {
 func DownloadSight(postId int, fileUrl string) error {
 	resp, err := http.Get(fileUrl)
 	if err != nil {
+		log.Printf("download failed: %v\n", err)
 		return fmt.Errorf("download failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	tmpFile, err := os.CreateTemp("", "wtsight-*.zip")
 	if err != nil {
+		log.Printf("temp file error: %v\n", err)
 		return fmt.Errorf("temp file error: %w", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -55,21 +62,25 @@ func DownloadSight(postId int, fileUrl string) error {
 
 	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
 		tmpFile.Close()
+		log.Printf("write error: %v\n", err)
 		return fmt.Errorf("write error: %w", err)
 	}
 	tmpFile.Close()
 
 	sightDirs, err := GetSightDirs()
 	if err != nil {
+		log.Printf("could not locate sight directories: %v\n", err)
 		return fmt.Errorf("could not locate sight directories: %w", err)
 	}
 
 	fallback := fmt.Sprintf("wtsight-%d", postId)
 	for _, dir := range sightDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("mkdir %s: %v\n", dir, err)
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		if err := ExtractZip(tmpPath, dir, fallback, true); err != nil {
+			log.Printf("extract to %s: %v\n", dir, err)
 			return fmt.Errorf("extract to %s: %w", dir, err)
 		}
 	}
@@ -104,13 +115,12 @@ func ExtractZip(src, destBase, fallbackName string, stripRoot bool) error {
 		fpath := filepath.Join(cleanDest, name)
 		cleanFpath := filepath.Clean(fpath)
 
-		fmt.Printf("fpath: %s, cleanFpath: %s\n", fpath, cleanFpath)
-
 		if cleanFpath != cleanDest &&
 			!strings.HasPrefix(
 				cleanFpath,
 				cleanDest+string(os.PathSeparator),
 			) {
+			log.Printf("Illegal path in archive: %s", f.Name)
 			return fmt.Errorf("Illegal path in archive: %s", f.Name)
 		}
 
@@ -172,9 +182,11 @@ func DeleteSkin(name string) {
 	go func() {
 		path := filepath.Join(CamoDir, name)
 		if err := os.RemoveAll(path); err != nil {
+			log.Printf("Delete error for %s: %v\n", name, err)
 			fmt.Printf("Delete error for %s: %v\n", name, err)
 			return
 		}
+		log.Printf("Deleted skin: %s\n", name)
 		fmt.Printf("Deleted skin: %s\n", name)
 	}()
 }
