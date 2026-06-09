@@ -31,14 +31,53 @@ func DownloadSkin(postId int, fileUrl string) error {
 	}
 	tmpFile.Close()
 
-	if err = ExtractZip(tmpPath, fmt.Sprintf("wtskin-%d", postId)); err != nil {
+	if err = ExtractZip(tmpPath, CamoDir, fmt.Sprintf("wtskin-%d", postId)); err != nil {
 		return fmt.Errorf("Extract error for %d: %w", postId, err)
 	}
 	return nil
 }
 
+// DownloadSight downloads a sight zip and extracts it into every
+// UserSights/all_tanks directory found across all save folders.
+func DownloadSight(postId int, fileUrl string) error {
+	resp, err := http.Get(fileUrl)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	tmpFile, err := os.CreateTemp("", "wtsight-*.zip")
+	if err != nil {
+		return fmt.Errorf("temp file error: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("write error: %w", err)
+	}
+	tmpFile.Close()
+
+	sightDirs, err := GetSightDirs()
+	if err != nil {
+		return fmt.Errorf("could not locate sight directories: %w", err)
+	}
+
+	fallback := fmt.Sprintf("wtsight-%d", postId)
+	for _, dir := range sightDirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+		if err := ExtractZip(tmpPath, dir, fallback); err != nil {
+			return fmt.Errorf("extract to %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
 // ExtractZip extracts a zip file to the CamoDir directory
-func ExtractZip(src, fallbackName string) error {
+func ExtractZip(src, destBase, fallbackName string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
 		return err
@@ -46,9 +85,9 @@ func ExtractZip(src, fallbackName string) error {
 	defer r.Close()
 
 	root := detectZipRoot(r)
-	dest := CamoDir
+	dest := destBase
 	if root == "" {
-		dest = filepath.Join(CamoDir, fallbackName)
+		dest = filepath.Join(destBase, fallbackName)
 	}
 
 	cleanDest := filepath.Clean(dest)

@@ -28,9 +28,7 @@ type PostRequest struct {
 
 const (
 	Port    = 4316
-	Version = "0.0.2"
-
-	maxLogEntries = 200
+	Version = "0.0.3"
 )
 
 var (
@@ -95,13 +93,20 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		path = CamoDir
 	case "sight":
-		//TODO
+		sightDirs, err := GetSightDirs()
+		if err != nil || len(sightDirs) == 0 {
+			http.Error(w, "Sight folder not found", http.StatusInternalServerError)
+			return
+		}
+		path = sightDirs[0]
 	case "installer":
 		path = filepath.Dir(getExecutablePath())
 	default:
 		http.Error(w, "Invalid target", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("Opening %s folder: %s\n", target, path)
 
 	var cmd *exec.Cmd
 	switch goruntime.GOOS {
@@ -134,7 +139,7 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	log.Printf("Downloading skin for postId: %d, fileUrl: %s", body.PostId, body.FileUrl)
+	log.Printf("Downloading for Post ID: %d, fileUrl: %s", body.PostId, body.FileUrl)
 
 	switch body.Type {
 	case "camo":
@@ -143,7 +148,15 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Successfully installed skin for postId %d", body.PostId)
+		log.Printf("Successfully installed Post ID %d", body.PostId)
+		fmt.Fprintf(w, "Installed")
+
+	case "sight":
+		if err := DownloadSight(body.PostId, body.FileUrl); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Successfully installed Post ID %d", body.PostId)
 		fmt.Fprintf(w, "Installed")
 
 	default:

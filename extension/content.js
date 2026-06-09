@@ -3,10 +3,12 @@ const POST_ATTR = "post_id";
 const BTN_MARKER = "local-dl-btn";
 const TYPE_MAP = {
   camouflage: "camo",
-  // sight: "sight",
+  sight: "sight",
 };
-
-const defaultTitle = "Install Camo";
+const TITLE_MAP = {
+  camouflage: "Install Camo",
+  sight: "Install Sight",
+};
 
 // Toast
 function getToastContainer() {
@@ -66,6 +68,8 @@ function addButton(post) {
   );
   if (!downloadType) return;
 
+  const defaultTitle = TITLE_MAP[downloadType] ?? "Install";
+
   const leftButtons = post.querySelector(".bottom .buttons .left");
   if (!leftButtons) return;
 
@@ -95,9 +99,11 @@ function addButton(post) {
     spinner.className = "wt-local-dl-spinner";
     label.appendChild(spinner);
 
+    const type = TYPE_MAP[downloadType];
+
     const result = await browser.runtime.sendMessage({
       action: "wt_install",
-      type: TYPE_MAP[downloadType],
+      type,
       postId,
       fileUrl,
     });
@@ -108,14 +114,14 @@ function addButton(post) {
     if (result?.ok) {
       label.textContent = "Installed";
       btn.style.color = "#4caf50";
-      showToast(`Skin installed for post #${postId}`, "success");
-      wtLog("info", `Downloaded skin for post ${postId}`);
+      showToast(`Successfully installed ${type} post #${postId}`, "success");
+      wtLog("info", `${type} downloaded for post ${postId}`);
     } else {
       label.textContent = "Failed";
       btn.style.color = "#f44336";
       const reason = result?.error ?? `HTTP ${result?.status}`;
-      showToast(`Download failed for post #${postId}: ${reason}`, "error");
-      wtLog("error", `Failed for post ${postId}: ${reason}`);
+      showToast(`Download ${type} failed for post #${postId}: ${reason}`, "error");
+      wtLog("error", `Failed to download ${type} for post ${postId}: ${reason}`);
     }
 
     setTimeout(() => {

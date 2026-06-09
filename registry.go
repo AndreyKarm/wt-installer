@@ -17,8 +17,9 @@ type RegistryPath struct {
 }
 
 var (
-	GameDir string
-	CamoDir string
+	GameDir   string
+	CamoDir   string
+	SightDirs []string
 )
 
 var launcherRegistryPath = RegistryPath{
@@ -34,6 +35,20 @@ var steamRegistryPath = RegistryPath{
 }
 
 const warThunderSteamAppID = "236390"
+
+func init() {
+	dir, err := findGameDir()
+	if err != nil {
+		log.Fatalf("Could not find War Thunder install path: %v", err)
+	}
+	GameDir = dir
+	CamoDir = filepath.Join(GameDir, "UserSkins")
+	SightDirs, err = GetSightDirs()
+	if err != nil {
+		log.Fatalf("Could not find sight folders: %v", err)
+	}
+	log.Printf("Found War Thunder at: %s", GameDir)
+}
 
 func openRegistryValue(p RegistryPath) (string, error) {
 	key, err := registry.OpenKey(p.Key, p.SubKey, registry.QUERY_VALUE)
@@ -130,12 +145,47 @@ func findGameDir() (string, error) {
 	return "", fmt.Errorf("War Thunder installation not found")
 }
 
-func init() {
-	dir, err := findGameDir()
+// Sights
+func GetSavesDirBase() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(
+		homeDir, "Documents", "My Games", "WarThunder", "Saves",
+	)
+}
+
+func GetSightDirs() ([]string, error) {
+	savesPath := GetSavesDirBase()
+	entries, err := os.ReadDir(savesPath)
 	if err != nil {
-		log.Fatalf("Could not find War Thunder install path: %v", err)
+		return nil, fmt.Errorf("could not read Saves directory: %w", err)
 	}
-	GameDir = dir
-	CamoDir = filepath.Join(GameDir, "UserSkins")
-	log.Printf("Found War Thunder at: %s", GameDir)
+
+	var dirs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if len(name) == 8 && isDigitsOnly(name) {
+			dirs = append(dirs, filepath.Join(
+				savesPath, name,
+				"production", "UserSights", "all_tanks",
+			))
+		}
+	}
+
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("no 8-digit save folders found in %s", savesPath)
+	}
+	fmt.Println(dirs)
+	return dirs, nil
+}
+
+func isDigitsOnly(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

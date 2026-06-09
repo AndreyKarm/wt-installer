@@ -37,6 +37,9 @@ document.getElementById("btn-camo").addEventListener("click", (e) => {
 document.getElementById("btn-installer").addEventListener("click", (e) => {
   openFolder("installer", e.currentTarget);
 });
+document.getElementById("btn-sight").addEventListener("click", (e) => {
+  openFolder("sight", e.currentTarget);
+});
 
 // Logs
 let currentTab = "server";
