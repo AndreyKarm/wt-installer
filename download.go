@@ -31,7 +31,7 @@ func DownloadSkin(postId int, fileUrl string) error {
 	}
 	tmpFile.Close()
 
-	if err = ExtractZip(tmpPath, CamoDir, fmt.Sprintf("wtskin-%d", postId)); err != nil {
+	if err = ExtractZip(tmpPath, CamoDir, fmt.Sprintf("wtskin-%d", postId), false); err != nil {
 		return fmt.Errorf("Extract error for %d: %w", postId, err)
 	}
 	return nil
@@ -69,7 +69,7 @@ func DownloadSight(postId int, fileUrl string) error {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
-		if err := ExtractZip(tmpPath, dir, fallback); err != nil {
+		if err := ExtractZip(tmpPath, dir, fallback, true); err != nil {
 			return fmt.Errorf("extract to %s: %w", dir, err)
 		}
 	}
@@ -77,7 +77,7 @@ func DownloadSight(postId int, fileUrl string) error {
 }
 
 // ExtractZip extracts a zip file to the CamoDir directory
-func ExtractZip(src, destBase, fallbackName string) error {
+func ExtractZip(src, destBase, fallbackName string, stripRoot bool) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
 		return err
@@ -86,15 +86,25 @@ func ExtractZip(src, destBase, fallbackName string) error {
 
 	root := detectZipRoot(r)
 	dest := destBase
-	if root == "" {
+	if root == "" && !stripRoot {
 		dest = filepath.Join(destBase, fallbackName)
 	}
 
 	cleanDest := filepath.Clean(dest)
 
 	for _, f := range r.File {
-		fpath := filepath.Join(cleanDest, filepath.FromSlash(f.Name))
+		name := filepath.FromSlash(f.Name)
+		if stripRoot && root != "" {
+			rel := strings.TrimPrefix(filepath.ToSlash(f.Name), root+"/")
+			if rel == "" {
+				continue // skip the root dir entry itself
+			}
+			name = filepath.FromSlash(rel)
+		}
+		fpath := filepath.Join(cleanDest, name)
 		cleanFpath := filepath.Clean(fpath)
+
+		fmt.Printf("fpath: %s, cleanFpath: %s\n", fpath, cleanFpath)
 
 		if cleanFpath != cleanDest &&
 			!strings.HasPrefix(
