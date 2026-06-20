@@ -39,7 +39,6 @@ const warThunderSteamAppID = "236390"
 func init() {
 	dir, err := FindGameDir()
 	if err != nil {
-		showFatalDialog("War Thunder not found", err.Error())
 		os.Exit(1)
 	}
 	GameDir = dir
