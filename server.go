@@ -28,7 +28,7 @@ type PostRequest struct {
 
 const (
 	Port    = 4316
-	Version = "0.1.2"
+	Version = "0.1.4"
 )
 
 var (
