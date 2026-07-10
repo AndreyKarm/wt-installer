@@ -1,81 +1,181 @@
-const MAX_EXT_LOGS = 200;
-let extLogs = [];
+const EXT_VERSION = browser.runtime.getManifest().version;
+const POST_ATTR = "post_id";
+const BTN_MARKER = "local-dl-btn";
+const TYPE_MAP = {
+  camouflage: "camo",
+  sight: "sight",
+};
+const TITLE_MAP = {
+  camouflage: "Install Camo",
+  sight: "Install Sight",
+};
 
-function addExtLog(level, source, message) {
-  extLogs.push({
-    time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
-    level,
-    source,
-    message: String(message),
-  });
-  if (extLogs.length > MAX_EXT_LOGS) {
-    extLogs = extLogs.slice(-MAX_EXT_LOGS);
-  }
+// Toast
+function getToastContainer() {
+  const existing = document.getElementById("wt-local-toast-container");
+  if (existing) return existing;
+  const container = document.createElement("div");
+  container.id = "wt-local-toast-container";
+  document.body.appendChild(container);
+  return container;
 }
 
-// Capture background script's own console output
-const _log = console.log.bind(console);
-const _warn = console.warn.bind(console);
-const _error = console.error.bind(console);
-console.log = (...args) => {
-  addExtLog("info", "bg", args.join(" "));
-  _log(...args);
-};
-console.warn = (...args) => {
-  addExtLog("warn", "bg", args.join(" "));
-  _warn(...args);
-};
-console.error = (...args) => {
-  addExtLog("error", "bg", args.join(" "));
-  _error(...args);
-};
+/**
+ * @param {string} message
+ * @param {"success"|"error"|"info"} type
+ * @param {number} duration ms before auto-dismiss
+ */
+function showToast(message, type = "info", duration = 4000) {
+  const container = getToastContainer();
 
-browser.runtime.onMessage.addListener((message) => {
-  if (message.action === "wt_install") {
-    return fetch(`http://localhost:4316/download`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: message.type,
-        postId: message.postId,
-        fileUrl: message.fileUrl,
-      }),
-    })
-      .then((r) => ({ ok: r.ok, status: r.status }))
-      .catch((err) => ({ ok: false, error: err.message }));
-  }
+  const toast = document.createElement("div");
+  toast.className = `wt-local-toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
 
-  if (message.action === "wt_server_version") {
-    return fetch("http://localhost:4316/version")
-      .then((r) => r.text())
-      .then((text) => ({ ok: true, version: text.replace("Version: ", "") }))
-      .catch((err) => ({ ok: false, error: err.message }));
-  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => toast.classList.add("visible"));
+  });
 
-  if (message.action === "wt_open_folder") {
-    return fetch(
-      `http://localhost:4316/openfolder?target=${encodeURIComponent(message.target)}`,
-      { method: "POST" }
-    )
-      .then((r) => ({ ok: r.ok, status: r.status }))
-      .catch((err) => ({ ok: false, error: err.message }));
-  }
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    toast.addEventListener("transitionend", () => toast.remove(), {
+      once: true,
+    });
+  }, duration);
+}
 
-  if (message.action === "wt_add_log") {
-    addExtLog(
-      message.level ?? "info",
-      message.source ?? "content",
-      message.message
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key === "Y") {
+    e.preventDefault();
+    const types = ["info", "success", "error"];
+    types.forEach((t, i) =>
+      setTimeout(() => showToast(`Test toast (${t})`, t), i * 600)
     );
-    return Promise.resolve({ ok: true });
-  }
-
-  if (message.action === "wt_get_ext_logs") {
-    return Promise.resolve({ ok: true, logs: [...extLogs] });
-  }
-
-  if (message.action === "wt_clear_ext_logs") {
-    extLogs = [];
-    return Promise.resolve({ ok: true });
   }
 });
+
+// Button Injection
+function addButton(post) {
+  if (post.querySelector(`.${BTN_MARKER}`)) return;
+
+  const postId = parseInt(post.getAttribute(POST_ATTR), 10);
+  if (!postId) return;
+
+  const downloadType = Object.keys(TYPE_MAP).find((cls) =>
+    post.classList.contains(cls)
+  );
+  if (!downloadType) return;
+
+  const defaultTitle = TITLE_MAP[downloadType] ?? "Install";
+
+  // Target the .buttons container inside .description
+  const buttonsWrapper = post.querySelector(
+    ".post_content .description .buttons"
+  );
+  if (!buttonsWrapper) return;
+
+  const existingDownload = buttonsWrapper.querySelector(
+    `a.button.downloadButton:not(.${BTN_MARKER})`
+  );
+  const fileUrl = existingDownload?.href ?? null;
+
+  const btn = document.createElement("a");
+  btn.className = `button downloadButton ${BTN_MARKER}`;
+  btn.title = defaultTitle;
+  btn.href = "#";
+
+  const label = document.createElement("span");
+  label.className = "num";
+  label.textContent = defaultTitle;
+  btn.appendChild(label);
+
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+
+    if (btn.dataset.pending) return;
+
+    btn.dataset.pending = "true";
+    label.textContent = "";
+    const spinner = document.createElement("span");
+    spinner.className = "wt-local-dl-spinner";
+    label.appendChild(spinner);
+
+    const type = TYPE_MAP[downloadType];
+
+    const result = await browser.runtime.sendMessage({
+      action: "wt_install",
+      type,
+      postId,
+      fileUrl,
+    });
+
+    delete btn.dataset.pending;
+    label.textContent = "";
+
+    if (result?.ok) {
+      label.textContent = "Installed";
+      btn.style.color = "#4caf50";
+      showToast(`Successfully installed ${type} post #${postId}`, "success");
+      wtLog("info", `${type} downloaded for post ${postId}`);
+    } else {
+      label.textContent = "Failed";
+      btn.style.color = "#f44336";
+      const reason = result?.error ?? `HTTP ${result?.status}`;
+      showToast(
+        `Download ${type} failed for post #${postId}: ${reason}`,
+        "error"
+      );
+      wtLog(
+        "error",
+        `Failed to download ${type} for post ${postId}: ${reason}`
+      );
+    }
+
+    setTimeout(() => {
+      label.textContent = defaultTitle;
+      btn.style.color = "";
+    }, 2000);
+  });
+
+  buttonsWrapper.appendChild(btn);
+}
+
+// Observer
+function processPosts() {
+  document.querySelectorAll(`.feed_item[${POST_ATTR}]`).forEach(addButton);
+}
+
+function processSpecificPost() {
+  addButton(document.querySelector(`.buttons`))
+}
+
+processPosts();
+processSpecificPost();
+
+const PostsObserver = new MutationObserver(processPosts);
+PostsObserver.observe(document.querySelector("#feedwrapper") ?? document.body, {
+  childList: true,
+  subtree: true,
+});
+
+const CertainPostObserver = new MutationObserver(processSpecificPost);
+PostsObserver.observe(document.querySelector('wrapper')) ?? document.body, {
+  childList: true,
+  subtree: true,
+}
+
+// Logs
+function wtLog(level, ...args) {
+  const message = args.map(String).join(" ");
+  if (level === "error") console.error("[WT]", message);
+  else console.log("[WT]", message);
+  browser.runtime
+    .sendMessage({
+      action: "wt_add_log",
+      level,
+      source: "content",
+      message,
+    })
+    .catch(() => { });
+}

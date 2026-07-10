@@ -28,7 +28,7 @@ type PostRequest struct {
 
 const (
 	Port    = 4316
-	Version = "0.0.3"
+	Version = "0.1.2"
 )
 
 var (
@@ -37,8 +37,7 @@ var (
 )
 
 func init() {
-	log.SetFlags(0)
-	log.SetOutput(&logCapture{Writer: log.Writer()})
+	ensureFileLogging()
 }
 
 func (lc *logCapture) Write(p []byte) (int, error) {
@@ -104,6 +103,13 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 		path = sightDirs[0]
 	case "installer":
 		path = filepath.Dir(getExecutablePath())
+	case "logs":
+		if LogDir == "" {
+			log.Printf("Log folder not found\n")
+			http.Error(w, "Log folder not found", http.StatusInternalServerError)
+			return
+		}
+		path = LogDir
 	default:
 		log.Printf("Invalid target: %s\n", target)
 		http.Error(w, "Invalid target", http.StatusBadRequest)
@@ -194,5 +200,6 @@ func startServer() {
 
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", Port), corsMiddleware(mux)); err != nil {
 		log.Printf("Server error: %v", err)
+		openLogsFolder()
 	}
 }

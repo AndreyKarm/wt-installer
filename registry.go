@@ -37,8 +37,11 @@ var steamRegistryPath = RegistryPath{
 const warThunderSteamAppID = "236390"
 
 func init() {
+	ensureFileLogging()
+
 	dir, err := FindGameDir()
 	if err != nil {
+		openLogsFolder()
 		os.Exit(1)
 	}
 	GameDir = dir

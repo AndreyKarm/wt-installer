@@ -8,7 +8,7 @@ Tool to download skins from WarThunder Live's official website into the game's s
 2. Place the executable file in any place save (e.g., `C:\Users\%username%\Documents\WT Installer.exe`).
 3. Run the executable file.
 4. In the tray select "Auto-start" to start the server automatically when pc starts.
-5. Install extension for [firefox](https://addons.mozilla.org/en-US/firefox/addon/wt-live-downloader/)(chrome requires fee to publish extension).
+5. Install extension for [firefox](https://addons.mozilla.org/en-US/firefox/addon/wt-live-downloader/) (chrome requires fee to publish extension).
 6. (Optional) Pin the extension icon to the taskbar.
 7. Go to [WarThunder Live's official website](https://live.warthunder.com/feed/all/) and download skins and sights in a single click.
 

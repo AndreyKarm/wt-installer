@@ -20,11 +20,6 @@ function getToastContainer() {
   return container;
 }
 
-/**
- * @param {string} message
- * @param {"success"|"error"|"info"} type
- * @param {number} duration ms before auto-dismiss
- */
 function showToast(message, type = "info", duration = 4000) {
   const container = getToastContainer();
 
@@ -45,7 +40,6 @@ function showToast(message, type = "info", duration = 4000) {
   }, duration);
 }
 
-
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.shiftKey && e.key === "Y") {
     e.preventDefault();
@@ -56,30 +50,13 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Button Injection
-function addButton(post) {
-  if (post.querySelector(`.${BTN_MARKER}`)) return;
-
-  const postId = parseInt(post.getAttribute(POST_ATTR), 10);
-  if (!postId) return;
-
-  const downloadType = Object.keys(TYPE_MAP).find((cls) =>
-    post.classList.contains(cls)
-  );
-  if (!downloadType) return;
-
+// Shared button factory
+function createDownloadButton(downloadType, postId, fileUrl) {
+  const type = TYPE_MAP[downloadType];
   const defaultTitle = TITLE_MAP[downloadType] ?? "Install";
 
-  const leftButtons = post.querySelector(".bottom .buttons .left");
-  if (!leftButtons) return;
-
-  const existingDownload = leftButtons.querySelector(
-    `.downloads.button_item:not(.${BTN_MARKER})`
-  );
-  const fileUrl = existingDownload?.href ?? null;
-
   const btn = document.createElement("a");
-  btn.className = `downloads button_item ${BTN_MARKER}`;
+  btn.className = `button downloads button_item ${BTN_MARKER}`;
   btn.title = defaultTitle;
   btn.href = "#";
 
@@ -98,8 +75,6 @@ function addButton(post) {
     const spinner = document.createElement("span");
     spinner.className = "wt-local-dl-spinner";
     label.appendChild(spinner);
-
-    const type = TYPE_MAP[downloadType];
 
     const result = await browser.runtime.sendMessage({
       action: "wt_install",
@@ -120,8 +95,14 @@ function addButton(post) {
       label.textContent = "Failed";
       btn.style.color = "#f44336";
       const reason = result?.error ?? `HTTP ${result?.status}`;
-      showToast(`Download ${type} failed for post #${postId}: ${reason}`, "error");
-      wtLog("error", `Failed to download ${type} for post ${postId}: ${reason}`);
+      showToast(
+        `Download ${type} failed for post #${postId}: ${reason}`,
+        "error"
+      );
+      wtLog(
+        "error",
+        `Failed to download ${type} for post ${postId}: ${reason}`
+      );
     }
 
     setTimeout(() => {
@@ -130,33 +111,95 @@ function addButton(post) {
     }, 2000);
   });
 
+  return btn;
+}
+
+function getDownloadType(el) {
+  return Object.keys(TYPE_MAP).find((cls) => el.classList.contains(cls));
+}
+
+// Button Injection — feed list
+function addButton(post) {
+  if (post.querySelector(`.${BTN_MARKER}`)) return;
+
+  const postId = parseInt(post.getAttribute(POST_ATTR), 10);
+  if (!postId) return;
+
+  const downloadType = getDownloadType(post);
+  if (!downloadType) return;
+
+  const leftButtons = post.querySelector(".bottom .buttons .left");
+  if (!leftButtons) return;
+
+  const existingDownload = leftButtons.querySelector(
+    `.downloads.button_item:not(.${BTN_MARKER})`
+  );
+  const fileUrl = existingDownload?.href ?? null;
+
+  const btn = createDownloadButton(downloadType, postId, fileUrl);
   leftButtons.appendChild(btn);
 }
 
-// Observer
+// Button Injection — fullview / lightbox popup
+function addPopupButton(wrapper) {
+  const container = wrapper.querySelector(".description .buttons");
+  if (!container || container.querySelector(`.${BTN_MARKER}`)) return;
+
+  const postId = parseInt(wrapper.getAttribute(POST_ATTR), 10);
+  if (!postId) return;
+
+  const downloadType = getDownloadType(wrapper);
+  if (!downloadType) return;
+
+  const existingDownload = container.querySelector(
+    "a.button.downloadButton"
+  );
+  if (!existingDownload) return;
+
+  const fileUrl = existingDownload.href ?? null;
+
+  const btn = createDownloadButton(downloadType, postId, fileUrl);
+  existingDownload.insertAdjacentElement("afterend", btn);
+}
+
+// Observer — feed
 function processPosts() {
+  document.querySelectorAll(`.feed_item[${POST_ATTR}]`).forEach(addButton);
+}
+
+// Observer — fullview popup
+function processPopup() {
   document
-    .querySelectorAll(`.feed_item[${POST_ATTR}]`)
-    .forEach(addButton);
+    .querySelectorAll(`#clb .wrapper[${POST_ATTR}]`)
+    .forEach(addPopupButton);
 }
 
 processPosts();
+processPopup();
 
-const observer = new MutationObserver(processPosts);
-observer.observe(
-  document.querySelector("#feedwrapper") ?? document.body,
-  { childList: true, subtree: true }
-);
+const feedObserver = new MutationObserver(processPosts);
+feedObserver.observe(document.querySelector("#feedwrapper") ?? document.body, {
+  childList: true,
+  subtree: true,
+});
+
+const popupObserver = new MutationObserver(processPopup);
+const clb = document.getElementById("clb");
+if (clb) {
+  popupObserver.observe(clb, { childList: true, subtree: true });
+}
 
 // Logs
 function wtLog(level, ...args) {
   const message = args.map(String).join(" ");
   if (level === "error") console.error("[WT]", message);
   else console.log("[WT]", message);
-  browser.runtime.sendMessage({
-    action: "wt_add_log",
-    level,
-    source: "content",
-    message,
-  }).catch(() => { });
+  browser.runtime
+    .sendMessage({
+      action: "wt_add_log",
+      level,
+      source: "content",
+      message,
+    })
+    .catch(() => { });
 }

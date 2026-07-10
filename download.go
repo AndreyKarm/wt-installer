@@ -16,6 +16,7 @@ func DownloadSkin(postId int, fileUrl string) error {
 	resp, err := http.Get(fileUrl)
 	if err != nil {
 		log.Printf("Download failed: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("Download failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -23,6 +24,7 @@ func DownloadSkin(postId int, fileUrl string) error {
 	tmpFile, err := os.CreateTemp("", "wtskin-*.zip")
 	if err != nil {
 		log.Printf("Temp file error: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("Temp file error: %w", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -31,12 +33,14 @@ func DownloadSkin(postId int, fileUrl string) error {
 	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
 		tmpFile.Close()
 		log.Printf("Write error: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("Write error: %w", err)
 	}
 	tmpFile.Close()
 
 	if err = ExtractZip(tmpPath, CamoDir, fmt.Sprintf("wtskin-%d", postId), false); err != nil {
 		log.Printf("Extract error for %d: %v\n", postId, err)
+		openLogsFolder()
 		return fmt.Errorf("Extract error for %d: %w", postId, err)
 	}
 	return nil
@@ -48,6 +52,7 @@ func DownloadSight(postId int, fileUrl string) error {
 	resp, err := http.Get(fileUrl)
 	if err != nil {
 		log.Printf("download failed: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("download failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -55,6 +60,7 @@ func DownloadSight(postId int, fileUrl string) error {
 	tmpFile, err := os.CreateTemp("", "wtsight-*.zip")
 	if err != nil {
 		log.Printf("temp file error: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("temp file error: %w", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -63,6 +69,7 @@ func DownloadSight(postId int, fileUrl string) error {
 	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
 		tmpFile.Close()
 		log.Printf("write error: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("write error: %w", err)
 	}
 	tmpFile.Close()
@@ -70,6 +77,7 @@ func DownloadSight(postId int, fileUrl string) error {
 	sightDirs, err := GetSightDirs()
 	if err != nil {
 		log.Printf("could not locate sight directories: %v\n", err)
+		openLogsFolder()
 		return fmt.Errorf("could not locate sight directories: %w", err)
 	}
 
@@ -77,10 +85,12 @@ func DownloadSight(postId int, fileUrl string) error {
 	for _, dir := range sightDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("mkdir %s: %v\n", dir, err)
+			openLogsFolder()
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		if err := ExtractZip(tmpPath, dir, fallback, true); err != nil {
 			log.Printf("extract to %s: %v\n", dir, err)
+			openLogsFolder()
 			return fmt.Errorf("extract to %s: %w", dir, err)
 		}
 	}

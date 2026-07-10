@@ -40,6 +40,9 @@ document.getElementById("btn-installer").addEventListener("click", (e) => {
 document.getElementById("btn-sight").addEventListener("click", (e) => {
   openFolder("sight", e.currentTarget);
 });
+document.getElementById("btn-logs").addEventListener("click", (e) => {
+  openFolder("logs", e.currentTarget);
+});
 
 // Logs
 let currentTab = "server";
