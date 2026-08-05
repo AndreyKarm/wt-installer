@@ -17,8 +17,8 @@ type RegistryPath struct {
 }
 
 var (
-	GameDir   string
-	CamoDir   string
+	GameDirs  []string
+	CamoDirs  []string
 	SightDirs []string
 )
 
@@ -39,20 +39,23 @@ const warThunderSteamAppID = "236390"
 func init() {
 	ensureFileLogging()
 
-	dir, err := FindGameDir()
+	dirs, err := FindAllGameDirs()
 	if err != nil {
 		openLogsFolder()
 		os.Exit(1)
 	}
-	GameDir = dir
-	CamoDir = filepath.Join(GameDir, "UserSkins")
+	GameDirs = dirs
+	CamoDirs = make([]string, len(dirs))
+	for i, d := range dirs {
+		CamoDirs[i] = filepath.Join(d, "UserSkins")
+	}
 
 	SightDirs, err = GetSightDirs()
 	if err != nil {
 		log.Printf("Warning: could not find sight folders: %v", err)
 	}
 
-	log.Printf("Found War Thunder at: %s", GameDir)
+	log.Printf("Found War Thunder install(s): %s", strings.Join(dirs, ", "))
 }
 
 func OpenRegistryValue(p RegistryPath) (string, error) {
@@ -137,19 +140,35 @@ func FindSteamGamePath(steamPath string) (string, error) {
 	return "", fmt.Errorf("War Thunder not found in any Steam library")
 }
 
-func FindGameDir() (string, error) {
-	// Installed via Gaijin Launcher
+// FindAllGameDirs checks for both the Gaijin Launcher and Steam
+// installations and returns every one that is actually present, instead
+// of stopping at the first match.
+func FindAllGameDirs() ([]string, error) {
+	var dirs []string
+	seen := make(map[string]bool)
+
 	if gamePath, err := OpenRegistryValue(launcherRegistryPath); err == nil {
-		return gamePath, nil
+		if !seen[gamePath] {
+			seen[gamePath] = true
+			dirs = append(dirs, gamePath)
+		}
 	}
 
-	// Installed via Steam
 	if steamPath, err := OpenRegistryValue(steamRegistryPath); err == nil {
-		return FindSteamGamePath(steamPath)
+		if steamGamePath, err := FindSteamGamePath(steamPath); err == nil {
+			if !seen[steamGamePath] {
+				seen[steamGamePath] = true
+				dirs = append(dirs, steamGamePath)
+			}
+		}
 	}
 
-	log.Printf("War Thunder installation not found")
-	return "", fmt.Errorf("War Thunder installation not found")
+	if len(dirs) == 0 {
+		log.Printf("War Thunder installation not found")
+		return nil, fmt.Errorf("War Thunder installation not found")
+	}
+
+	return dirs, nil
 }
 
 // Sights

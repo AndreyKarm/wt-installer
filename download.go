@@ -38,10 +38,24 @@ func DownloadSkin(postId int, fileUrl string) error {
 	}
 	tmpFile.Close()
 
-	if err = ExtractZip(tmpPath, CamoDir, fmt.Sprintf("wtskin-%d", postId), false); err != nil {
-		log.Printf("Extract error for %d: %v\n", postId, err)
+	if len(CamoDirs) == 0 {
+		log.Printf("No camo directories found\n")
 		openLogsFolder()
-		return fmt.Errorf("Extract error for %d: %w", postId, err)
+		return fmt.Errorf("no camo directories found")
+	}
+
+	fallback := fmt.Sprintf("wtskin-%d", postId)
+	for _, dir := range CamoDirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("mkdir %s: %v\n", dir, err)
+			openLogsFolder()
+			return fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+		if err = ExtractZip(tmpPath, dir, fallback, false); err != nil {
+			log.Printf("Extract error for %d in %s: %v\n", postId, dir, err)
+			openLogsFolder()
+			return fmt.Errorf("Extract error for %d in %s: %w", postId, dir, err)
+		}
 	}
 	return nil
 }
@@ -187,16 +201,17 @@ func detectZipRoot(r *zip.ReadCloser) string {
 	return root
 }
 
-// DeleteSkin removes a skin folder from CamoDir by name.
+// DeleteSkin removes a skin folder from every detected CamoDir by name.
 func DeleteSkin(name string) {
 	go func() {
-		path := filepath.Join(CamoDir, name)
-		if err := os.RemoveAll(path); err != nil {
-			log.Printf("Delete error for %s: %v\n", name, err)
-			fmt.Printf("Delete error for %s: %v\n", name, err)
-			return
+		for _, dir := range CamoDirs {
+			path := filepath.Join(dir, name)
+			if err := os.RemoveAll(path); err != nil {
+				log.Printf("Delete error for %s in %s: %v\n", name, dir, err)
+				fmt.Printf("Delete error for %s in %s: %v\n", name, dir, err)
+				continue
+			}
+			log.Printf("Deleted skin: %s from %s\n", name, dir)
 		}
-		log.Printf("Deleted skin: %s\n", name)
-		fmt.Printf("Deleted skin: %s\n", name)
 	}()
 }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,7 +29,7 @@ type PostRequest struct {
 
 const (
 	Port    = 4316
-	Version = "0.1.4"
+	Version = "0.1.5"
 )
 
 var (
@@ -87,12 +88,12 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	var path string
 	switch target {
 	case "camo":
-		if CamoDir == "" {
+		if len(CamoDirs) == 0 {
 			log.Printf("Camo folder not found\n")
 			http.Error(w, "Camo folder not found", http.StatusInternalServerError)
 			return
 		}
-		path = CamoDir
+		path = strings.Join(CamoDirs, ", ")
 	case "sight":
 		sightDirs, err := GetSightDirs()
 		if err != nil || len(sightDirs) == 0 {
