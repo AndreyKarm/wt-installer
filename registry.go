@@ -38,24 +38,7 @@ const warThunderSteamAppID = "236390"
 
 func init() {
 	ensureFileLogging()
-
-	dirs, err := FindAllGameDirs()
-	if err != nil {
-		openLogsFolder()
-		os.Exit(1)
-	}
-	GameDirs = dirs
-	CamoDirs = make([]string, len(dirs))
-	for i, d := range dirs {
-		CamoDirs[i] = filepath.Join(d, "UserSkins")
-	}
-
-	SightDirs, err = GetSightDirs()
-	if err != nil {
-		log.Printf("Warning: could not find sight folders: %v", err)
-	}
-
-	log.Printf("Found War Thunder install(s): %s", strings.Join(dirs, ", "))
+	RefreshGameDirs()
 }
 
 func OpenRegistryValue(p RegistryPath) (string, error) {
@@ -66,6 +49,32 @@ func OpenRegistryValue(p RegistryPath) (string, error) {
 	defer key.Close()
 	val, _, err := key.GetStringValue(p.ValName)
 	return val, err
+}
+
+// RefreshGameDirs re-scans for War Thunder installs. Safe to call at any
+// time (e.g. lazily before a download) so the tray app and its HTTP
+// server keep running even if the game wasn't found yet, instead of
+// killing the whole background service.
+func RefreshGameDirs() {
+	dirs, err := FindAllGameDirs()
+	if err != nil {
+		log.Printf("Warning: no War Thunder installation found yet: %v", err)
+		GameDirs = nil
+		CamoDirs = nil
+	} else {
+		GameDirs = dirs
+		CamoDirs = make([]string, len(dirs))
+		for i, d := range dirs {
+			CamoDirs[i] = filepath.Join(d, "UserSkins")
+		}
+		log.Printf("Found War Thunder install(s): %s", strings.Join(dirs, ", "))
+	}
+
+	if sd, err := GetSightDirs(); err != nil {
+		log.Printf("Warning: could not find sight folders: %v", err)
+	} else {
+		SightDirs = sd
+	}
 }
 
 // ParseVDFKV parses a single VDF line of the form "key"  "value"

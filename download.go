@@ -2,13 +2,16 @@ package main
 
 import (
 	"archive/zip"
+	"compress/bzip2"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // DownloadSkin downloads a skin from the given URL and extracts it to CamoDir
@@ -39,9 +42,12 @@ func DownloadSkin(postId int, fileUrl string) error {
 	tmpFile.Close()
 
 	if len(CamoDirs) == 0 {
-		log.Printf("No camo directories found\n")
-		openLogsFolder()
-		return fmt.Errorf("no camo directories found")
+		RefreshGameDirs()
+		if len(CamoDirs) == 0 {
+			log.Printf("No camo directories found\n")
+			openLogsFolder()
+			return fmt.Errorf("no camo directories found")
+		}
 	}
 
 	fallback := fmt.Sprintf("wtskin-%d", postId)
@@ -111,6 +117,114 @@ func DownloadSight(postId int, fileUrl string) error {
 	return nil
 }
 
+func fallbackExtract(src, cleanDest string, stripRoot bool, root string) error {
+	tmpDir, err := os.MkdirTemp("", "wtextract-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := runExternalUnzip(src, tmpDir); err != nil {
+		return err
+	}
+
+	srcRoot := tmpDir
+	if stripRoot && root != "" {
+		srcRoot = filepath.Join(tmpDir, root)
+	}
+
+	if err := os.MkdirAll(cleanDest, 0755); err != nil {
+		return err
+	}
+	return moveTreeSanitized(srcRoot, cleanDest)
+}
+
+func init() {
+	// Go's archive/zip only natively supports Store (0) and Deflate (8).
+	// Some skin archives are built with 7-Zip using BZip2 (12), LZMA (14),
+	// PPMd (98) or Deflate64 (9). BZip2 has a stdlib decoder we can wire
+	// in directly; the others fall back to an external tool below.
+	zip.RegisterDecompressor(12, func(r io.Reader) io.ReadCloser {
+		return io.NopCloser(bzip2.NewReader(r))
+	})
+}
+
+var nativelySupportedMethods = map[uint16]bool{
+	zip.Store:   true,
+	zip.Deflate: true,
+	12:          true, // bzip2 (registered above)
+}
+
+// hasUnsupportedMethod reports the first compression method in the archive
+// that Go can't decompress on its own (e.g. LZMA/PPMd/Deflate64 from 7-Zip).
+func hasUnsupportedMethod(r *zip.ReadCloser) (uint16, bool) {
+	for _, f := range r.File {
+		if !nativelySupportedMethods[f.Method] {
+			return f.Method, true
+		}
+	}
+	return 0, false
+}
+
+// runExternalUnzip tries 7-Zip, then tar (bsdtar on Windows 10 1803+/macOS
+// ships built-in and supports more zip compression methods than Go's
+// stdlib), extracting src fully into destDir.
+func runExternalUnzip(src, destDir string) error {
+	if p, err := exec.LookPath("7z"); err == nil {
+		cmd := exec.Command(p, "x", "-y", "-o"+destDir, src)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	if p, err := exec.LookPath("tar"); err == nil {
+		cmd := exec.Command(p, "-xf", src, "-C", destDir)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("no working extractor found for this archive's compression method (tried 7z, tar) - please install 7-Zip")
+}
+
+// moveTreeSanitized copies everything under srcDir into destDir, applying
+// the same Windows filename sanitization used for native extraction.
+func moveTreeSanitized(srcDir, destDir string) error {
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		rel = filepath.FromSlash(sanitizeWindowsPath(filepath.ToSlash(rel)))
+		target := filepath.Join(destDir, rel)
+
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		_, err = io.Copy(out, in)
+		return err
+	})
+}
+
 // ExtractZip extracts a zip file to the CamoDir directory
 func ExtractZip(src, destBase, fallbackName string, stripRoot bool) error {
 	r, err := zip.OpenReader(src)
@@ -127,6 +241,14 @@ func ExtractZip(src, destBase, fallbackName string, stripRoot bool) error {
 
 	cleanDest := filepath.Clean(dest)
 
+	if method, unsupported := hasUnsupportedMethod(r); unsupported {
+		log.Printf(
+			"Archive uses unsupported compression method %d, falling back to external extractor\n",
+			method,
+		)
+		return fallbackExtract(src, cleanDest, stripRoot, root)
+	}
+
 	for _, f := range r.File {
 		name := filepath.FromSlash(f.Name)
 		if stripRoot && root != "" {
@@ -136,6 +258,7 @@ func ExtractZip(src, destBase, fallbackName string, stripRoot bool) error {
 			}
 			name = filepath.FromSlash(rel)
 		}
+		name = filepath.FromSlash(sanitizeWindowsPath(filepath.ToSlash(name)))
 		fpath := filepath.Join(cleanDest, name)
 		cleanFpath := filepath.Clean(fpath)
 
@@ -214,4 +337,23 @@ func DeleteSkin(name string) {
 			log.Printf("Deleted skin: %s from %s\n", name, dir)
 		}
 	}()
+}
+
+var invalidWinChars = strings.NewReplacer(
+	"<", "_", ">", "_", ":", "_", `"`, "_", "|", "_", "?", "_", "*", "_",
+)
+
+// sanitizeWindowsPath replaces characters that are illegal in Windows
+// file/folder names and strips trailing dots/spaces from each segment.
+func sanitizeWindowsPath(p string) string {
+	parts := strings.Split(filepath.ToSlash(p), "/")
+	for i, part := range parts {
+		part = invalidWinChars.Replace(part)
+		part = strings.TrimRight(part, " .")
+		if part == "" {
+			part = "_"
+		}
+		parts[i] = part
+	}
+	return strings.Join(parts, "/")
 }

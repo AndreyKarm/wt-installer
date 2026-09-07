@@ -29,7 +29,7 @@ type PostRequest struct {
 
 const (
 	Port    = 4316
-	Version = "0.1.5"
+	Version = "0.1.6"
 )
 
 var (
@@ -122,7 +122,8 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	var cmd *exec.Cmd
 	switch goruntime.GOOS {
 	case "windows":
-		cmd = exec.Command("explorer", path)
+		// cmd = exec.Command("explorer", path)
+		cmd = exec.Command("cmd", "/c", "start", "", path)
 	case "darwin":
 		cmd = exec.Command("open", path)
 	default:
@@ -199,7 +200,7 @@ func startServer() {
 		fmt.Fprint(w, "OK")
 	})
 
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", Port), corsMiddleware(mux)); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", Port), corsMiddleware(mux)); err != nil {
 		log.Printf("Server error: %v", err)
 		openLogsFolder()
 	}
