@@ -89,12 +89,14 @@ function createDownloadButton(downloadType, postId, fileUrl) {
     if (result?.ok) {
       label.textContent = "Installed";
       btn.style.color = "#4caf50";
-      showToast(`Successfully installed ${type} post #${postId}`, "success");
-      wtLog("info", `${type} downloaded for post ${postId}`);
+      const detail = result.message ? `: ${result.message}` : "";
+      showToast(`${type} post #${postId}${detail}`, "success");
+      wtLog("info", `${type} downloaded for post ${postId}${detail}`);
     } else {
       label.textContent = "Failed";
       btn.style.color = "#f44336";
-      const reason = result?.error ?? `HTTP ${result?.status}`;
+      const reason =
+        result?.error || result?.message || `HTTP ${result?.status}`;
       showToast(
         `Download ${type} failed for post #${postId}: ${reason}`,
         "error"

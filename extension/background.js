@@ -41,7 +41,11 @@ browser.runtime.onMessage.addListener((message) => {
         fileUrl: message.fileUrl,
       }),
     })
-      .then((r) => ({ ok: r.ok, status: r.status }))
+      .then(async (r) => ({
+        ok: r.ok,
+        status: r.status,
+        message: (await r.text()).trim(),
+      }))
       .catch((err) => ({ ok: false, error: err.message }));
   }
 

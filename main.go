@@ -67,7 +67,7 @@ func onReady() {
 			case <-autoStartItem.ClickedCh:
 				AutoStartEnabled = !AutoStartEnabled
 				if err := setAutoStart(AutoStartEnabled); err != nil {
-					fmt.Printf("Error toggling auto-start: %v\n", err)
+					log.Printf("Error toggling auto-start: %v\n", err)
 					AutoStartEnabled = !AutoStartEnabled
 				}
 				if AutoStartEnabled {

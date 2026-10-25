@@ -6,9 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os/exec"
+	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +28,7 @@ type PostRequest struct {
 
 const (
 	Port    = 4316
-	Version = "0.1.6"
+	Version = "0.1.7"
 )
 
 var (
@@ -54,9 +53,29 @@ func (lc *logCapture) Write(p []byte) (int, error) {
 	return lc.Writer.Write(p)
 }
 
+// isAllowedOrigin limits callers to the extension and War Thunder Live.
+// Without this any website open in the browser could make the app install
+// arbitrary archives or read the logs. Requests with no Origin (curl, local
+// tools) are allowed; browsers always send one on cross-origin POSTs.
+func isAllowedOrigin(origin string) bool {
+	return origin == "" ||
+		origin == "https://live.warthunder.com" ||
+		strings.HasPrefix(origin, "moz-extension://") ||
+		strings.HasPrefix(origin, "chrome-extension://")
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if !isAllowedOrigin(origin) {
+			log.Printf("Rejected request from origin %s\n", origin)
+			http.Error(w, "Forbidden origin", http.StatusForbidden)
+			return
+		}
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
@@ -85,15 +104,19 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := r.URL.Query().Get("target")
-	var path string
+	var paths []string
 	switch target {
 	case "camo":
-		if len(CamoDirs) == 0 {
+		paths = getCamoDirs()
+		if len(paths) == 0 {
+			RefreshGameDirs()
+			paths = getCamoDirs()
+		}
+		if len(paths) == 0 {
 			log.Printf("Camo folder not found\n")
 			http.Error(w, "Camo folder not found", http.StatusInternalServerError)
 			return
 		}
-		path = strings.Join(CamoDirs, ", ")
 	case "sight":
 		sightDirs, err := GetSightDirs()
 		if err != nil || len(sightDirs) == 0 {
@@ -101,38 +124,35 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Sight folder not found", http.StatusInternalServerError)
 			return
 		}
-		path = sightDirs[0]
+		paths = sightDirs
 	case "installer":
-		path = filepath.Dir(getExecutablePath())
+		paths = []string{filepath.Dir(getExecutablePath())}
 	case "logs":
 		if LogDir == "" {
 			log.Printf("Log folder not found\n")
 			http.Error(w, "Log folder not found", http.StatusInternalServerError)
 			return
 		}
-		path = LogDir
+		paths = []string{LogDir}
 	default:
 		log.Printf("Invalid target: %s\n", target)
 		http.Error(w, "Invalid target", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Opening %s folder: %s\n", target, path)
-
-	var cmd *exec.Cmd
-	switch goruntime.GOOS {
-	case "windows":
-		// cmd = exec.Command("explorer", path)
-		cmd = exec.Command("cmd", "/c", "start", "", path)
-	case "darwin":
-		cmd = exec.Command("open", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
-	}
-
-	if err := cmd.Start(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// One window per folder: with several game installs or save folders
+	// each one is opened separately.
+	for _, path := range paths {
+		// UserSkins / all_tanks may not exist until the first install.
+		if err := os.MkdirAll(path, 0755); err != nil {
+			log.Printf("mkdir %s: %v\n", path, err)
+		}
+		log.Printf("Opening %s folder: %s\n", target, path)
+		if err := openInExplorer(path); err != nil {
+			log.Printf("Open folder %s: %v\n", path, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	fmt.Fprintf(w, "OK")
 }
@@ -144,40 +164,37 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body PostRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		log.Printf("Invalid JSON body: %v\n", err)
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
 	log.Printf("Downloading for Post ID: %d, fileUrl: %s", body.PostId, body.FileUrl)
 
+	var (
+		summary string
+		err     error
+	)
 	switch body.Type {
 	case "camo":
-		if err := DownloadSkin(body.PostId, body.FileUrl); err != nil {
-			log.Printf("DownloadSkin error: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("Successfully installed Post ID %d", body.PostId)
-		fmt.Fprintf(w, "Installed")
-
+		summary, err = DownloadSkin(body.PostId, body.FileUrl)
 	case "sight":
-		if err := DownloadSight(body.PostId, body.FileUrl); err != nil {
-			log.Printf("DownloadSight error: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.Printf("Successfully installed Post ID %d", body.PostId)
-		fmt.Fprintf(w, "Installed")
-
+		summary, err = DownloadSight(body.PostId, body.FileUrl)
 	default:
 		log.Printf("Invalid type: %s\n", body.Type)
 		http.Error(w, "Invalid type", http.StatusBadRequest)
 		return
 	}
+	if err != nil {
+		log.Printf("Install %s error: %v\n", body.Type, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Post ID %d: %s", body.PostId, summary)
+	fmt.Fprint(w, summary)
 }
 
 func startServer() {
@@ -194,6 +211,10 @@ func startServer() {
 	})
 
 	mux.HandleFunc("/logs/clear", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		logMu.Lock()
 		logBuffer = nil
 		logMu.Unlock()

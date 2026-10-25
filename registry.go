@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -16,11 +17,21 @@ type RegistryPath struct {
 	ValName string
 }
 
+// Guarded by dirsMu: RefreshGameDirs can run from HTTP handlers while other
+// requests read them. Use getCamoDirs() instead of reading CamoDirs directly.
 var (
+	dirsMu    sync.RWMutex
 	GameDirs  []string
 	CamoDirs  []string
 	SightDirs []string
 )
+
+// getCamoDirs returns a copy of the detected UserSkins directories.
+func getCamoDirs() []string {
+	dirsMu.RLock()
+	defer dirsMu.RUnlock()
+	return append([]string(nil), CamoDirs...)
+}
 
 var launcherRegistryPath = RegistryPath{
 	Key:     registry.CURRENT_USER,
@@ -57,6 +68,11 @@ func OpenRegistryValue(p RegistryPath) (string, error) {
 // killing the whole background service.
 func RefreshGameDirs() {
 	dirs, err := FindAllGameDirs()
+	sd, sightErr := GetSightDirs()
+
+	dirsMu.Lock()
+	defer dirsMu.Unlock()
+
 	if err != nil {
 		log.Printf("Warning: no War Thunder installation found yet: %v", err)
 		GameDirs = nil
@@ -70,8 +86,8 @@ func RefreshGameDirs() {
 		log.Printf("Found War Thunder install(s): %s", strings.Join(dirs, ", "))
 	}
 
-	if sd, err := GetSightDirs(); err != nil {
-		log.Printf("Warning: could not find sight folders: %v", err)
+	if sightErr != nil {
+		log.Printf("Warning: could not find sight folders: %v", sightErr)
 	} else {
 		SightDirs = sd
 	}

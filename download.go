@@ -2,141 +2,242 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"compress/bzip2"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
-// DownloadSkin downloads a skin from the given URL and extracts it to CamoDir
-func DownloadSkin(postId int, fileUrl string) error {
-	resp, err := http.Get(fileUrl)
-	if err != nil {
-		log.Printf("Download failed: %v\n", err)
-		openLogsFolder()
-		return fmt.Errorf("Download failed: %w", err)
-	}
-	defer resp.Body.Close()
+// installMu serializes installs so two concurrent downloads can't race on
+// picking the same free "_2" folder or file name.
+var installMu sync.Mutex
 
-	tmpFile, err := os.CreateTemp("", "wtskin-*.zip")
-	if err != nil {
-		log.Printf("Temp file error: %v\n", err)
-		openLogsFolder()
-		return fmt.Errorf("Temp file error: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+var downloadClient = &http.Client{Timeout: 5 * time.Minute}
 
-	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
-		log.Printf("Write error: %v\n", err)
-		openLogsFolder()
-		return fmt.Errorf("Write error: %w", err)
-	}
-	tmpFile.Close()
+// DownloadSkin downloads a skin and installs it into every detected
+// UserSkins directory. If a skin folder with the same name already exists,
+// its content is compared to the incoming skin: if every incoming file is
+// already there unchanged, nothing is written; otherwise the skin is
+// installed under name_2, name_3, ... so an unrelated skin is never
+// overwritten. Returns a short human-readable summary.
+func DownloadSkin(postId int, fileUrl string) (string, error) {
+	installMu.Lock()
+	defer installMu.Unlock()
 
-	if len(CamoDirs) == 0 {
+	camoDirs := getCamoDirs()
+	if len(camoDirs) == 0 {
 		RefreshGameDirs()
-		if len(CamoDirs) == 0 {
+		camoDirs = getCamoDirs()
+		if len(camoDirs) == 0 {
 			log.Printf("No camo directories found\n")
 			openLogsFolder()
-			return fmt.Errorf("no camo directories found")
+			return "", fmt.Errorf("no camo directories found")
 		}
 	}
 
-	fallback := fmt.Sprintf("wtskin-%d", postId)
-	for _, dir := range CamoDirs {
+	srcDir, root, cleanup, err := downloadAndExtract(fileUrl, "wtskin")
+	if err != nil {
+		openLogsFolder()
+		return "", err
+	}
+	defer cleanup()
+
+	name := root
+	if name == "" {
+		name = fmt.Sprintf("wtskin-%d", postId)
+	}
+
+	var notes []string
+	for _, dir := range camoDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("mkdir %s: %v\n", dir, err)
 			openLogsFolder()
-			return fmt.Errorf("mkdir %s: %w", dir, err)
+			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
-		if err = ExtractZip(tmpPath, dir, fallback, false); err != nil {
-			log.Printf("Extract error for %d in %s: %v\n", postId, dir, err)
+		note, err := installSkinFolder(srcDir, dir, name)
+		if err != nil {
+			log.Printf("Install error for %d in %s: %v\n", postId, dir, err)
 			openLogsFolder()
-			return fmt.Errorf("Extract error for %d in %s: %w", postId, dir, err)
+			return "", fmt.Errorf("install error for %d in %s: %w", postId, dir, err)
 		}
+		notes = append(notes, note)
 	}
-	return nil
+	return joinUnique(notes), nil
+}
+
+// installSkinFolder copies srcDir into destBase/name, or into the first
+// name_N that is either free or already holds this exact skin.
+func installSkinFolder(srcDir, destBase, name string) (string, error) {
+	for i := 1; ; i++ {
+		candidate := name
+		if i > 1 {
+			candidate = fmt.Sprintf("%s_%d", name, i)
+		}
+		target := filepath.Join(destBase, candidate)
+
+		info, err := os.Stat(target)
+		if os.IsNotExist(err) {
+			if _, err := copyTree(srcDir, target, false); err != nil {
+				return "", err
+			}
+			log.Printf("Installed skin into %s", target)
+			if i > 1 {
+				return fmt.Sprintf("Installed as %s (a different skin named %s already exists)", candidate, name), nil
+			}
+			return fmt.Sprintf("Installed as %s", candidate), nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if !info.IsDir() {
+			continue
+		}
+
+		same, err := treeContains(target, srcDir)
+		if err != nil {
+			return "", err
+		}
+		if same {
+			log.Printf("Skin already installed at %s, skipping", target)
+			return fmt.Sprintf("Already installed as %s", candidate), nil
+		}
+		log.Printf("Folder %s holds a different skin, trying next name", target)
+	}
 }
 
 // DownloadSight downloads a sight zip and extracts it into every
-// UserSights/all_tanks directory found across all save folders.
-func DownloadSight(postId int, fileUrl string) error {
-	resp, err := http.Get(fileUrl)
-	if err != nil {
-		log.Printf("download failed: %v\n", err)
-		openLogsFolder()
-		return fmt.Errorf("download failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	tmpFile, err := os.CreateTemp("", "wtsight-*.zip")
-	if err != nil {
-		log.Printf("temp file error: %v\n", err)
-		openLogsFolder()
-		return fmt.Errorf("temp file error: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
-		log.Printf("write error: %v\n", err)
-		openLogsFolder()
-		return fmt.Errorf("write error: %w", err)
-	}
-	tmpFile.Close()
+// UserSights/all_tanks directory found across all save folders. If a file
+// with the same name already exists in a destination, its content is
+// compared to the incoming file: identical content is left untouched,
+// while differing content is written under name_2, name_3, etc.
+func DownloadSight(postId int, fileUrl string) (string, error) {
+	installMu.Lock()
+	defer installMu.Unlock()
 
 	sightDirs, err := GetSightDirs()
-	if err != nil {
+	if err != nil || len(sightDirs) == 0 {
 		log.Printf("could not locate sight directories: %v\n", err)
 		openLogsFolder()
-		return fmt.Errorf("could not locate sight directories: %w", err)
+		return "", fmt.Errorf("could not locate sight directories: %v", err)
 	}
 
-	fallback := fmt.Sprintf("wtsight-%d", postId)
+	srcDir, _, cleanup, err := downloadAndExtract(fileUrl, "wtsight")
+	if err != nil {
+		openLogsFolder()
+		return "", err
+	}
+	defer cleanup()
+
+	var total copyStats
 	for _, dir := range sightDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("mkdir %s: %v\n", dir, err)
 			openLogsFolder()
-			return fmt.Errorf("mkdir %s: %w", dir, err)
+			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
-		if err := ExtractZip(tmpPath, dir, fallback, true); err != nil {
-			log.Printf("extract to %s: %v\n", dir, err)
+		stats, err := copyTree(srcDir, dir, true)
+		if err != nil {
+			log.Printf("install sight %d to %s: %v\n", postId, dir, err)
 			openLogsFolder()
-			return fmt.Errorf("extract to %s: %w", dir, err)
+			return "", fmt.Errorf("install to %s: %w", dir, err)
 		}
+		total.written += stats.written
+		total.skipped += stats.skipped
+		total.renamed += stats.renamed
 	}
-	return nil
+
+	msg := fmt.Sprintf("Installed %d file(s)", total.written)
+	if total.renamed > 0 {
+		msg += fmt.Sprintf(", %d renamed to avoid overwriting a different sight", total.renamed)
+	}
+	if total.skipped > 0 {
+		msg += fmt.Sprintf(", %d already present", total.skipped)
+	}
+	return msg, nil
 }
 
-func fallbackExtract(src, cleanDest string, stripRoot bool, root string) error {
-	tmpDir, err := os.MkdirTemp("", "wtextract-*")
+// downloadAndExtract fetches fileUrl and extracts it into a temp folder.
+// srcDir is the folder holding the archive contents, with a single
+// top-level folder (root) stripped if the archive has one. The caller must
+// call cleanup.
+func downloadAndExtract(fileUrl, prefix string) (srcDir, root string, cleanup func(), err error) {
+	zipPath, err := fetchArchive(fileUrl, prefix)
 	if err != nil {
-		return err
+		return "", "", nil, err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.Remove(zipPath)
 
-	if err := runExternalUnzip(src, tmpDir); err != nil {
-		return err
+	tmpDir, err := os.MkdirTemp("", prefix+"-extract-*")
+	if err != nil {
+		return "", "", nil, fmt.Errorf("temp dir error: %w", err)
+	}
+	cleanup = func() { os.RemoveAll(tmpDir) }
+
+	if err := extractArchive(zipPath, tmpDir); err != nil {
+		cleanup()
+		log.Printf("extract error: %v\n", err)
+		return "", "", nil, fmt.Errorf("extract error: %w", err)
 	}
 
-	srcRoot := tmpDir
-	if stripRoot && root != "" {
-		srcRoot = filepath.Join(tmpDir, root)
+	srcDir = tmpDir
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		cleanup()
+		return "", "", nil, err
+	}
+	if len(entries) == 0 {
+		cleanup()
+		return "", "", nil, fmt.Errorf("archive is empty")
+	}
+	if len(entries) == 1 && entries[0].IsDir() {
+		root = entries[0].Name()
+		srcDir = filepath.Join(tmpDir, root)
+	}
+	return srcDir, root, cleanup, nil
+}
+
+// fetchArchive downloads fileUrl into a temp file and returns its path.
+func fetchArchive(fileUrl, prefix string) (string, error) {
+	u, err := url.Parse(fileUrl)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		log.Printf("Invalid file URL: %q\n", fileUrl)
+		return "", fmt.Errorf("invalid file URL: %q", fileUrl)
 	}
 
-	if err := os.MkdirAll(cleanDest, 0755); err != nil {
-		return err
+	resp, err := downloadClient.Get(fileUrl)
+	if err != nil {
+		log.Printf("Download failed: %v\n", err)
+		return "", fmt.Errorf("download failed: %w", err)
 	}
-	return moveTreeSanitized(srcRoot, cleanDest)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Download failed: %s returned %s\n", fileUrl, resp.Status)
+		return "", fmt.Errorf("download failed: server returned %s", resp.Status)
+	}
+
+	tmpFile, err := os.CreateTemp("", prefix+"-*.zip")
+	if err != nil {
+		log.Printf("Temp file error: %v\n", err)
+		return "", fmt.Errorf("temp file error: %w", err)
+	}
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		log.Printf("Write error: %v\n", err)
+		return "", fmt.Errorf("write error: %w", err)
+	}
+	tmpFile.Close()
+	return tmpFile.Name(), nil
 }
 
 func init() {
@@ -187,10 +288,102 @@ func runExternalUnzip(src, destDir string) error {
 	return fmt.Errorf("no working extractor found for this archive's compression method (tried 7z, tar) - please install 7-Zip")
 }
 
-// moveTreeSanitized copies everything under srcDir into destDir, applying
-// the same Windows filename sanitization used for native extraction.
-func moveTreeSanitized(srcDir, destDir string) error {
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+// extractArchive extracts the zip at src into the empty directory dest,
+// sanitizing names for Windows and dropping macOS metadata entries.
+func extractArchive(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	if method, unsupported := hasUnsupportedMethod(r); unsupported {
+		log.Printf(
+			"Archive uses unsupported compression method %d, falling back to external extractor\n",
+			method,
+		)
+		rawDir, err := os.MkdirTemp("", "wtextract-raw-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(rawDir)
+		if err := runExternalUnzip(src, rawDir); err != nil {
+			return err
+		}
+		_, err = copyTree(rawDir, dest, false)
+		return err
+	}
+
+	cleanDest := filepath.Clean(dest)
+	for _, f := range r.File {
+		name := sanitizeWindowsPath(strings.TrimSuffix(filepath.ToSlash(f.Name), "/"))
+		if isJunkEntry(name) {
+			continue
+		}
+		fpath := filepath.Clean(filepath.Join(cleanDest, filepath.FromSlash(name)))
+		if !strings.HasPrefix(fpath, cleanDest+string(os.PathSeparator)) {
+			log.Printf("Illegal path in archive: %s", f.Name)
+			return fmt.Errorf("illegal path in archive: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(fpath, 0755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+		if err := writeZipFile(f, fpath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeZipFile(f *zip.File, path string) error {
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	// Fixed permissions: modes stored in the zip can be 0 or read-only,
+	// which on Windows would block reinstalling over the file later.
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, rc); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// isJunkEntry reports archive entries that are OS metadata, not content.
+func isJunkEntry(slashPath string) bool {
+	for _, part := range strings.Split(slashPath, "/") {
+		if part == "__MACOSX" || part == ".DS_Store" {
+			return true
+		}
+	}
+	return false
+}
+
+type copyStats struct {
+	written, skipped, renamed int
+}
+
+// copyTree copies everything under srcDir into destDir, applying the same
+// Windows filename sanitization used for native extraction. When
+// dedupIdentical is true, files that already exist at the destination are
+// compared by content: identical files are left alone, differing files are
+// written under a "_2", "_3", ... suffix.
+func copyTree(srcDir, destDir string, dedupIdentical bool) (copyStats, error) {
+	var stats copyStats
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -199,10 +392,16 @@ func moveTreeSanitized(srcDir, destDir string) error {
 			return err
 		}
 		if rel == "." {
+			return os.MkdirAll(destDir, 0755)
+		}
+		slashRel := sanitizeWindowsPath(filepath.ToSlash(rel))
+		if isJunkEntry(slashRel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		rel = filepath.FromSlash(sanitizeWindowsPath(filepath.ToSlash(rel)))
-		target := filepath.Join(destDir, rel)
+		target := filepath.Join(destDir, filepath.FromSlash(slashRel))
 
 		if info.IsDir() {
 			return os.MkdirAll(target, 0755)
@@ -210,133 +409,134 @@ func moveTreeSanitized(srcDir, destDir string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return err
 		}
-		in, err := os.Open(path)
+
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		defer in.Close()
-		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
-		if err != nil {
+
+		writeTarget := target
+		if dedupIdentical {
+			finalPath, skip, derr := dedupeTargetPath(target, data)
+			if derr != nil {
+				return derr
+			}
+			if skip {
+				log.Printf("Skipping identical file: %s", target)
+				stats.skipped++
+				return nil
+			}
+			if finalPath != target {
+				log.Printf("File differs, writing as: %s", finalPath)
+				stats.renamed++
+			}
+			writeTarget = finalPath
+		}
+
+		if err := os.WriteFile(writeTarget, data, 0644); err != nil {
 			return err
 		}
-		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
+		stats.written++
+		return nil
 	})
+	return stats, err
 }
 
-// ExtractZip extracts a zip file to the CamoDir directory
-func ExtractZip(src, destBase, fallbackName string, stripRoot bool) error {
-	r, err := zip.OpenReader(src)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-
-	root := detectZipRoot(r)
-	dest := destBase
-	if root == "" && !stripRoot {
-		dest = filepath.Join(destBase, fallbackName)
-	}
-
-	cleanDest := filepath.Clean(dest)
-
-	if method, unsupported := hasUnsupportedMethod(r); unsupported {
-		log.Printf(
-			"Archive uses unsupported compression method %d, falling back to external extractor\n",
-			method,
-		)
-		return fallbackExtract(src, cleanDest, stripRoot, root)
-	}
-
-	for _, f := range r.File {
-		name := filepath.FromSlash(f.Name)
-		if stripRoot && root != "" {
-			rel := strings.TrimPrefix(filepath.ToSlash(f.Name), root+"/")
-			if rel == "" {
-				continue // skip the root dir entry itself
-			}
-			name = filepath.FromSlash(rel)
-		}
-		name = filepath.FromSlash(sanitizeWindowsPath(filepath.ToSlash(name)))
-		fpath := filepath.Join(cleanDest, name)
-		cleanFpath := filepath.Clean(fpath)
-
-		if cleanFpath != cleanDest &&
-			!strings.HasPrefix(
-				cleanFpath,
-				cleanDest+string(os.PathSeparator),
-			) {
-			log.Printf("Illegal path in archive: %s", f.Name)
-			return fmt.Errorf("Illegal path in archive: %s", f.Name)
-		}
-
-		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(fpath, f.Mode()); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
-			return err
-		}
-
-		out, err := os.OpenFile(
-			fpath,
-			os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
-			f.Mode(),
-		)
+// treeContains reports whether every file under srcDir also exists under
+// dir with identical content. Extra files in dir are ignored, so a skin the
+// user tweaked by adding files still counts as the same skin.
+func treeContains(dir, srcDir string) (bool, error) {
+	same := true
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
-		rc, err := f.Open()
-		if err != nil {
-			out.Close()
-			return err
+		if info.IsDir() {
+			return nil
 		}
-
-		_, err = io.Copy(out, rc)
-		out.Close()
-		rc.Close()
+		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
 			return err
 		}
-	}
-
-	return nil
+		other := filepath.Join(dir, rel)
+		otherInfo, err := os.Stat(other)
+		if err != nil || otherInfo.IsDir() || otherInfo.Size() != info.Size() {
+			same = false
+			return filepath.SkipAll
+		}
+		a, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(other)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(a, b) {
+			same = false
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return same, err
 }
 
-// detectZipRoot returns the single top-level directory in a zip, or "" if
-// there are multiple (meaning files sit directly at the root).
-func detectZipRoot(r *zip.ReadCloser) string {
-	var root string
-	for _, f := range r.File {
-		parts := strings.SplitN(filepath.ToSlash(f.Name), "/", 2)
-		top := parts[0]
-		if root == "" {
-			root = top
-		} else if top != root {
-			return ""
+// dedupeTargetPath decides where newData should actually be written given a
+// desired target path. If target doesn't exist, it's used as-is. If it
+// exists with identical content, skip=true is returned (caller should do
+// nothing). If it exists with different content, target_2, target_3, ...
+// are tried until either a free name or a byte-identical match is found.
+func dedupeTargetPath(target string, newData []byte) (finalPath string, skip bool, err error) {
+	ext := filepath.Ext(target)
+	base := strings.TrimSuffix(target, ext)
+
+	for i := 1; ; i++ {
+		candidate := target
+		if i > 1 {
+			candidate = fmt.Sprintf("%s_%d%s", base, i, ext)
 		}
+
+		existing, readErr := os.ReadFile(candidate)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				return candidate, false, nil
+			}
+			return "", false, readErr
+		}
+
+		if bytes.Equal(existing, newData) {
+			return "", true, nil
+		}
+		// content differs, try the next suffix
 	}
-	return root
 }
 
 // DeleteSkin removes a skin folder from every detected CamoDir by name.
 func DeleteSkin(name string) {
 	go func() {
-		for _, dir := range CamoDirs {
+		for _, dir := range getCamoDirs() {
 			path := filepath.Join(dir, name)
 			if err := os.RemoveAll(path); err != nil {
 				log.Printf("Delete error for %s in %s: %v\n", name, dir, err)
-				fmt.Printf("Delete error for %s in %s: %v\n", name, dir, err)
 				continue
 			}
 			log.Printf("Deleted skin: %s from %s\n", name, dir)
 		}
 	}()
+}
+
+// joinUnique joins notes with "; ", dropping repeats (the same outcome in
+// several game installs is reported once).
+func joinUnique(notes []string) string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, n := range notes {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, "; ")
 }
 
 var invalidWinChars = strings.NewReplacer(

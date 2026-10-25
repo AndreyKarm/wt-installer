@@ -50,4 +50,8 @@ if %errorlevel% equ 0 (
 ) else (
   echo Build failed.
 )
+
+echo Compressing using UPX...
+upx --best --lzma "WT Installer.exe"
+
 pause

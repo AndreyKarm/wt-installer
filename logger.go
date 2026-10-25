@@ -5,12 +5,12 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
@@ -101,17 +101,23 @@ func openLogsFolder() {
 		if LogDir == "" {
 			return
 		}
-		var cmd *exec.Cmd
-		switch goruntime.GOOS {
-		case "windows":
-			cmd = exec.Command("explorer", LogDir)
-		case "darwin":
-			cmd = exec.Command("open", LogDir)
-		default:
-			cmd = exec.Command("xdg-open", LogDir)
-		}
-		if err := cmd.Start(); err != nil {
+		if err := openInExplorer(LogDir); err != nil {
 			log.Printf("failed to open logs folder: %v", err)
 		}
 	})
+}
+
+// openInExplorer opens a folder in Windows Explorer via ShellExecute. This
+// avoids `cmd /c start`, which misparses paths containing & or ^ and
+// flashes a console window from the GUI build.
+func openInExplorer(path string) error {
+	verb, err := windows.UTF16PtrFromString("open")
+	if err != nil {
+		return err
+	}
+	file, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL)
 }

@@ -41,7 +41,7 @@ func getLatestRelease() (*githubRelease, error) {
 	}
 	req.Header.Set("User-Agent", appName+"/"+Version)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -114,11 +114,16 @@ func ApplyUpdate(downloadURL string) error {
 	batPath := filepath.Join(dir, "_update.bat")
 
 	log.Printf("Downloading update from %s", downloadURL)
-	resp, err := http.Get(downloadURL)
+	resp, err := downloadClient.Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 	defer resp.Body.Close()
+	// Without this an error page would be saved as the new exe and the
+	// app would replace itself with a broken file.
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: server returned %s", resp.Status)
+	}
 
 	f, err := os.Create(newExePath)
 	if err != nil {
