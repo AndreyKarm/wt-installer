@@ -53,14 +53,27 @@ document.addEventListener("keydown", (e) => {
 // Installed state: post id (string) -> "camo" | "sight", from the server
 let installedPosts = {};
 
+// Install button -> its "✕" uninstall button
+const removeButtons = new WeakMap();
+
+function showSpinner(label) {
+  label.textContent = "";
+  const spinner = document.createElement("span");
+  spinner.className = "wt-local-dl-spinner";
+  label.appendChild(spinner);
+}
+
 // Shows the idle label: "Installed" for posts already on disk, otherwise
-// the install title. Clicking an installed post still reinstalls it.
+// the install title. Clicking an installed post still reinstalls it; the
+// "✕" next to it uninstalls.
 function renderIdle(btn) {
   if (btn.dataset.pending) return;
   const label = btn.querySelector(".num");
   const isInstalled = Boolean(installedPosts[btn.dataset.postId]);
   btn.classList.toggle("wt-local-installed", isInstalled);
   btn.style.color = "";
+  const removeBtn = removeButtons.get(btn);
+  if (removeBtn) removeBtn.style.display = isInstalled ? "" : "none";
   if (isInstalled) {
     label.textContent = "✓ Installed";
     btn.title = "Already installed. Click to install again";
@@ -80,8 +93,9 @@ async function refreshInstalled() {
   document.querySelectorAll(`.${BTN_MARKER}`).forEach(renderIdle);
 }
 
-// Shared button factory
-function createDownloadButton(downloadType, postId, fileUrl) {
+// Shared button factory: returns the install button and its uninstall
+// button, which callers insert right after it.
+function createDownloadButtons(downloadType, postId, fileUrl) {
   const type = TYPE_MAP[downloadType];
   const defaultTitle = TITLE_MAP[downloadType] ?? "Install";
 
@@ -94,7 +108,49 @@ function createDownloadButton(downloadType, postId, fileUrl) {
   const label = document.createElement("span");
   label.className = "num";
   btn.appendChild(label);
+
+  const removeBtn = document.createElement("a");
+  removeBtn.className = "button button_item wt-local-uninstall";
+  removeBtn.href = "#";
+  removeBtn.title = "Uninstall: delete its files from the game folders";
+  removeBtn.textContent = "✕";
+  removeButtons.set(btn, removeBtn);
   renderIdle(btn);
+
+  removeBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (btn.dataset.pending) return;
+    if (
+      !confirm(
+        `Uninstall ${type} post #${postId}?\nThis deletes its files from your game folders.`
+      )
+    ) {
+      return;
+    }
+
+    btn.dataset.pending = "true";
+    removeBtn.style.display = "none";
+    showSpinner(label);
+
+    const result = await browser.runtime.sendMessage({
+      action: "wt_uninstall",
+      postId,
+    });
+    delete btn.dataset.pending;
+
+    if (result?.ok) {
+      delete installedPosts[String(postId)];
+      const detail = result.message ? `: ${result.message}` : "";
+      showToast(`Uninstalled ${type} post #${postId}${detail}`, "success");
+      wtLog("info", `Uninstalled ${type} post ${postId}${detail}`);
+    } else {
+      const reason =
+        result?.error || result?.message || `HTTP ${result?.status}`;
+      showToast(`Uninstall failed for post #${postId}: ${reason}`, "error");
+      wtLog("error", `Failed to uninstall post ${postId}: ${reason}`);
+    }
+    renderIdle(btn);
+  });
 
   btn.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -102,10 +158,8 @@ function createDownloadButton(downloadType, postId, fileUrl) {
     if (btn.dataset.pending) return;
 
     btn.dataset.pending = "true";
-    label.textContent = "";
-    const spinner = document.createElement("span");
-    spinner.className = "wt-local-dl-spinner";
-    label.appendChild(spinner);
+    removeBtn.style.display = "none";
+    showSpinner(label);
 
     const result = await browser.runtime.sendMessage({
       action: "wt_install",
@@ -142,7 +196,7 @@ function createDownloadButton(downloadType, postId, fileUrl) {
     setTimeout(() => renderIdle(btn), 2000);
   });
 
-  return btn;
+  return [btn, removeBtn];
 }
 
 function getDownloadType(el) {
@@ -167,8 +221,7 @@ function addButton(post) {
   );
   const fileUrl = existingDownload?.href ?? null;
 
-  const btn = createDownloadButton(downloadType, postId, fileUrl);
-  leftButtons.appendChild(btn);
+  leftButtons.append(...createDownloadButtons(downloadType, postId, fileUrl));
 }
 
 // Button Injection — fullview / lightbox popup
@@ -189,8 +242,7 @@ function addPopupButton(wrapper) {
 
   const fileUrl = existingDownload.href ?? null;
 
-  const btn = createDownloadButton(downloadType, postId, fileUrl);
-  existingDownload.insertAdjacentElement("afterend", btn);
+  existingDownload.after(...createDownloadButtons(downloadType, postId, fileUrl));
 }
 
 // Observer — feed

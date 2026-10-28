@@ -49,6 +49,10 @@ func onReady() {
 	updateItem := systray.AddMenuItem("Checking for updates...", "")
 	updateItem.Disable()
 	systray.AddSeparator()
+	skinsItem := systray.AddMenuItem("Open skins folder", "Open UserSkins in every game install")
+	sightsItem := systray.AddMenuItem("Open sights folder", "Open the UserSights folders")
+	logsItem := systray.AddMenuItem("Open logs folder", "Open the log files folder")
+	systray.AddSeparator()
 	quitItem := systray.AddMenuItem("Quit", "Quit "+app.Name)
 
 	go server.Start()
@@ -89,11 +93,23 @@ func onReady() {
 				} else {
 					autoStartItem.Uncheck()
 				}
+			case <-skinsItem.ClickedCh:
+				go openFolder("camo")
+			case <-sightsItem.ClickedCh:
+				go openFolder("sight")
+			case <-logsItem.ClickedCh:
+				go openFolder("logs")
 			case <-quitItem.ClickedCh:
 				systray.Quit()
 			}
 		}
 	}()
+}
+
+func openFolder(target string) {
+	if err := server.OpenFolder(target); err != nil {
+		log.Printf("Tray: open %s folder: %v", target, err)
+	}
 }
 
 func onExit() {

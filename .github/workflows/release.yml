@@ -21,8 +21,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Add MinGW to PATH
-        run: echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+      # A tag newer than app.Version would make every client "update" to
+      # the same build on each start, forever.
+      - name: Check tag matches app.Version
+        shell: pwsh
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $tag = $env:TAG.TrimStart('v')
+          $m = Select-String -Path internal/app/app.go -Pattern 'Version\s*=\s*"([^"]+)"'
+          if (-not $m) { Write-Error "Version not found in internal/app/app.go"; exit 1 }
+          $version = $m.Matches[0].Groups[1].Value
+          if ($tag -ne $version) {
+            Write-Error "Release tag '$env:TAG' does not match app.Version '$version'"
+            exit 1
+          }
+          Write-Host "Tag $env:TAG matches app.Version $version"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
 
       - name: Install rsrc
         run: go install github.com/akavel/rsrc@latest
@@ -32,8 +52,7 @@ jobs:
 
       - name: Build
         env:
-          CGO_ENABLED: "1"
-          CC: gcc
+          CGO_ENABLED: "0"
         run: >
           go build
           -ldflags="-s -w -H=windowsgui"

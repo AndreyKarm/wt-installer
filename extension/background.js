@@ -49,6 +49,20 @@ browser.runtime.onMessage.addListener((message) => {
       .catch((err) => ({ ok: false, error: err.message }));
   }
 
+  if (message.action === "wt_uninstall") {
+    return fetch("http://localhost:4316/uninstall", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId: message.postId }),
+    })
+      .then(async (r) => ({
+        ok: r.ok,
+        status: r.status,
+        message: (await r.text()).trim(),
+      }))
+      .catch((err) => ({ ok: false, error: err.message }));
+  }
+
   if (message.action === "wt_installed") {
     return fetch("http://localhost:4316/installed")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))

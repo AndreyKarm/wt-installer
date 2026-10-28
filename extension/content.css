@@ -34,6 +34,15 @@
   color: var(--wt-success-color) !important;
 }
 
+.wt-local-uninstall {
+  padding-left: 0.6em !important;
+  padding-right: 0.6em !important;
+  color: var(--wt-text-color-muted) !important;
+}
+.wt-local-uninstall:hover {
+  color: var(--wt-error-color) !important;
+}
+
 #wt-local-toast-container {
   position: fixed;
   top: 1.5rem;

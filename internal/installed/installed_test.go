@@ -46,6 +46,33 @@ func TestStatusReportsOnlyPostsWithFilesOnDisk(t *testing.T) {
 	}
 }
 
+func TestLookupSharedPathsAndRemove(t *testing.T) {
+	useTempStore(t)
+	Add(1, "sight", []string{`C:\s\a.blk`, `C:\s\b.blk`})
+	Add(2, "sight", []string{`C:\s\b.blk`, `C:\s\c.blk`})
+
+	rec, shared, ok, err := Lookup(1)
+	if err != nil || !ok {
+		t.Fatalf("Lookup: %v %v", ok, err)
+	}
+	if len(rec.Paths) != 2 || len(shared) != 1 || !shared[`C:\s\b.blk`] {
+		t.Errorf("rec %+v shared %v", rec, shared)
+	}
+
+	if err := Remove(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, _ := Lookup(1); ok {
+		t.Errorf("post 1 still recorded")
+	}
+	if _, _, ok, _ := Lookup(2); !ok {
+		t.Errorf("post 2 lost")
+	}
+	if err := Remove(99); err != nil {
+		t.Errorf("Remove of unknown post: %v", err)
+	}
+}
+
 func TestEmptyAndCorruptStore(t *testing.T) {
 	useTempStore(t)
 

@@ -3,6 +3,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -67,14 +68,13 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Version: %s", app.Version)
 }
 
-func openFolderHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		log.Printf("Method not allowed: %s\n", r.Method)
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+var errInvalidTarget = errors.New("invalid target")
 
-	target := r.URL.Query().Get("target")
+// OpenFolder opens the folders for target ("camo", "sight", "installer" or
+// "logs") in Explorer, one window per folder: with several game installs or
+// save folders each one is opened separately. Used by /openfolder and the
+// tray menu.
+func OpenFolder(target string) error {
 	var paths []string
 	switch target {
 	case "camo":
@@ -85,15 +85,13 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(paths) == 0 {
 			log.Printf("Camo folder not found\n")
-			http.Error(w, "Camo folder not found", http.StatusInternalServerError)
-			return
+			return errors.New("camo folder not found")
 		}
 	case "sight":
 		sightDirs, err := gamedirs.SightDirs()
 		if err != nil || len(sightDirs) == 0 {
 			log.Printf("Sight folder not found: %v\n", err)
-			http.Error(w, "Sight folder not found", http.StatusInternalServerError)
-			return
+			return errors.New("sight folder not found")
 		}
 		paths = sightDirs
 	case "installer":
@@ -101,18 +99,14 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	case "logs":
 		if logging.Dir() == "" {
 			log.Printf("Log folder not found\n")
-			http.Error(w, "Log folder not found", http.StatusInternalServerError)
-			return
+			return errors.New("log folder not found")
 		}
 		paths = []string{logging.Dir()}
 	default:
 		log.Printf("Invalid target: %s\n", target)
-		http.Error(w, "Invalid target", http.StatusBadRequest)
-		return
+		return errInvalidTarget
 	}
 
-	// One window per folder: with several game installs or save folders
-	// each one is opened separately.
 	for _, path := range paths {
 		// UserSkins / all_tanks may not exist until the first install.
 		if err := os.MkdirAll(path, 0755); err != nil {
@@ -121,11 +115,54 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Opening %s folder: %s\n", target, path)
 		if err := winutil.OpenInExplorer(path); err != nil {
 			log.Printf("Open folder %s: %v\n", path, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return err
 		}
 	}
+	return nil
+}
+
+func openFolderHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		log.Printf("Method not allowed: %s\n", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := OpenFolder(r.URL.Query().Get("target")); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, errInvalidTarget) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
 	fmt.Fprintf(w, "OK")
+}
+
+func uninstallHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		PostId int `json:"postId"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PostId == 0 {
+		log.Printf("Invalid uninstall body: %v\n", err)
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := installer.Uninstall(body.PostId)
+	if err != nil {
+		log.Printf("Uninstall %d error: %v\n", body.PostId, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Uninstalled post %d: %s", body.PostId, summary)
+	fmt.Fprint(w, summary)
 }
 
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +228,7 @@ func Start() {
 	mux.HandleFunc("/openfolder", openFolderHandler)
 	mux.HandleFunc("/download", downloadHandler)
 	mux.HandleFunc("/installed", installedHandler)
+	mux.HandleFunc("/uninstall", uninstallHandler)
 	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(logging.Entries())
 	})

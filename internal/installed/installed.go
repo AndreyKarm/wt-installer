@@ -96,6 +96,57 @@ func Add(postId int, kind string, paths []string) error {
 	return save(f)
 }
 
+// Lookup returns the record for postId and the set of its paths that other
+// recorded posts also point at (sights deduplicated against an identical
+// file), which an uninstall must keep.
+func Lookup(postId int) (rec Record, shared map[string]bool, ok bool, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	f, err := load()
+	if err != nil {
+		return Record{}, nil, false, err
+	}
+	id := strconv.Itoa(postId)
+	rec, ok = f.Posts[id]
+	if !ok {
+		return Record{}, nil, false, nil
+	}
+	mine := make(map[string]bool, len(rec.Paths))
+	for _, p := range rec.Paths {
+		mine[p] = true
+	}
+	shared = map[string]bool{}
+	for other, r := range f.Posts {
+		if other == id {
+			continue
+		}
+		for _, p := range r.Paths {
+			if mine[p] {
+				shared[p] = true
+			}
+		}
+	}
+	return rec, shared, true, nil
+}
+
+// Remove deletes the record for postId, if any.
+func Remove(postId int) error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	f, err := load()
+	if err != nil {
+		return err
+	}
+	id := strconv.Itoa(postId)
+	if _, ok := f.Posts[id]; !ok {
+		return nil
+	}
+	delete(f.Posts, id)
+	return save(f)
+}
+
 // Status returns post id → type for every recorded post that still has at
 // least one of its paths on disk. Records whose files are gone (deleted by
 // the user, or on a drive that isn't connected) are left in the store but

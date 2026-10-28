@@ -3,18 +3,97 @@ package installer
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"liotom/installer/internal/installed"
 )
 
 func TestMain(m *testing.M) {
 	// Never write to the real %APPDATA% store from tests.
 	recordInstall = func(int, string, []string) error { return nil }
+	// httptest servers are plain http on 127.0.0.1.
+	allowDownloadURL = func(*url.URL) bool { return true }
 	os.Exit(m.Run())
+}
+
+func TestIsWarThunderURL(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://live.warthunder.com/dl/abc/":                  true,
+		"https://cdn-live.warthunder.com/uploads/a/b/skin.zip": true,
+		"https://warthunder.com/x":                             true,
+		"http://live.warthunder.com/dl/abc/":                   false,
+		"https://evilwarthunder.com/x":                         false,
+		"https://live.warthunder.com.evil.example/x":           false,
+		"https://example.com/?u=live.warthunder.com":           false,
+	} {
+		u, _ := url.Parse(raw)
+		if got := isWarThunderURL(u); got != want {
+			t.Errorf("%s: got %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestDownloadRejectsDisallowedHostsAndRedirects(t *testing.T) {
+	withCamoDir(t)
+	other := serveZips(t, map[string][]byte{
+		"skin": makeZip(t, map[string]string{"tiger/a.dds": "A"}),
+	})
+	allowed := httptest.NewServer(http.RedirectHandler(other.URL+"/skin", http.StatusFound))
+	t.Cleanup(allowed.Close)
+
+	allowedHost, _ := url.Parse(allowed.URL)
+	old := allowDownloadURL
+	allowDownloadURL = func(u *url.URL) bool { return u.Host == allowedHost.Host }
+	t.Cleanup(func() { allowDownloadURL = old })
+
+	if _, err := DownloadSkin(1, other.URL+"/skin"); err == nil {
+		t.Errorf("direct download from disallowed host succeeded")
+	}
+	if _, err := DownloadSkin(1, allowed.URL+"/"); err == nil || !strings.Contains(err.Error(), "disallowed host") {
+		t.Errorf("redirect to disallowed host not rejected: %v", err)
+	}
+}
+
+func TestSizeLimits(t *testing.T) {
+	withCamoDir(t)
+	big := strings.Repeat("x", 4096)
+	srv := serveZips(t, map[string][]byte{
+		"big":   makeZip(t, map[string]string{"tiger/a.dds": big}),
+		"many":  makeZip(t, map[string]string{"t/a": "1", "t/b": "2", "t/c": "3"}),
+		"small": makeZip(t, map[string]string{"tiger/a.dds": "A"}),
+	})
+	restore := func(p *int64, v int64) {
+		old := *p
+		*p = v
+		t.Cleanup(func() { *p = old })
+	}
+
+	restore(&maxExtractedBytes, 1000)
+	if _, err := DownloadSkin(1, srv.URL+"/big"); !errors.Is(err, errTooLarge) {
+		t.Errorf("extracted size cap: %v", err)
+	}
+	if _, err := DownloadSkin(2, srv.URL+"/small"); err != nil {
+		t.Errorf("small archive under the cap failed: %v", err)
+	}
+
+	oldFiles := maxArchiveFiles
+	maxArchiveFiles = 2
+	t.Cleanup(func() { maxArchiveFiles = oldFiles })
+	if _, err := DownloadSkin(3, srv.URL+"/many"); !errors.Is(err, errTooLarge) {
+		t.Errorf("file count cap: %v", err)
+	}
+
+	restore(&maxArchiveBytes, 50)
+	if _, err := DownloadSkin(4, srv.URL+"/big"); !errors.Is(err, errTooLarge) {
+		t.Errorf("download size cap: %v", err)
+	}
 }
 
 type recorded struct {
@@ -68,6 +147,104 @@ func TestInstallsAreRecorded(t *testing.T) {
 		g := (*records)[i]
 		if g.postId != w.postId || g.kind != w.kind || strings.Join(g.paths, "|") != strings.Join(w.paths, "|") {
 			t.Errorf("record %d: got %+v, want %+v", i, g, w)
+		}
+	}
+}
+
+// useMemoryStore swaps the installed store for an in-memory map.
+func useMemoryStore(t *testing.T) map[int]installed.Record {
+	store := map[int]installed.Record{}
+	oldRec, oldLook, oldForget := recordInstall, lookupInstall, forgetInstall
+	recordInstall = func(id int, kind string, paths []string) error {
+		store[id] = installed.Record{Type: kind, Paths: paths}
+		return nil
+	}
+	lookupInstall = func(id int) (installed.Record, map[string]bool, bool, error) {
+		rec, ok := store[id]
+		shared := map[string]bool{}
+		for other, r := range store {
+			if other == id {
+				continue
+			}
+			for _, p := range r.Paths {
+				for _, mine := range rec.Paths {
+					if p == mine {
+						shared[p] = true
+					}
+				}
+			}
+		}
+		return rec, shared, ok, nil
+	}
+	forgetInstall = func(id int) error {
+		delete(store, id)
+		return nil
+	}
+	t.Cleanup(func() { recordInstall, lookupInstall, forgetInstall = oldRec, oldLook, oldForget })
+	return store
+}
+
+func TestUninstall(t *testing.T) {
+	camo := withCamoDir(t)
+	sights := t.TempDir()
+	oldSights := listSightDirs
+	listSightDirs = func() ([]string, error) { return []string{sights}, nil }
+	t.Cleanup(func() { listSightDirs = oldSights })
+	store := useMemoryStore(t)
+
+	srv := serveZips(t, map[string][]byte{
+		"skin":   makeZip(t, map[string]string{"tiger/a.dds": "A"}),
+		"sightA": makeZip(t, map[string]string{"p/shared.blk": "S", "p/a.blk": "1"}),
+		"sightB": makeZip(t, map[string]string{"p/shared.blk": "S", "p/b.blk": "2"}),
+	})
+	if _, err := DownloadSkin(1, srv.URL+"/skin"); err != nil {
+		t.Fatal(err)
+	}
+	DownloadSight(2, srv.URL+"/sightA")
+	DownloadSight(3, srv.URL+"/sightB")
+
+	if _, err := Uninstall(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(camo, "tiger")); !os.IsNotExist(err) {
+		t.Errorf("skin folder still there")
+	}
+	if _, ok := store[1]; ok {
+		t.Errorf("skin record not removed")
+	}
+
+	if _, err := Uninstall(2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sights, "a.blk")); !os.IsNotExist(err) {
+		t.Errorf("a.blk still there")
+	}
+	if _, err := os.Stat(filepath.Join(sights, "shared.blk")); err != nil {
+		t.Errorf("shared.blk removed although post 3 uses it: %v", err)
+	}
+
+	if _, err := Uninstall(2); err == nil {
+		t.Errorf("uninstalling twice succeeded")
+	}
+}
+
+func TestUninstallOnlyTouchesGameFolders(t *testing.T) {
+	camo := withCamoDir(t)
+	store := useMemoryStore(t)
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "important")
+	os.Mkdir(victim, 0755)
+	nested := filepath.Join(camo, "tiger", "sub")
+	os.MkdirAll(nested, 0755)
+
+	store[7] = installed.Record{Type: "camo", Paths: []string{victim, camo, nested}}
+	msg, err := Uninstall(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{victim, camo, nested} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s was removed (%s)", p, msg)
 		}
 	}
 }

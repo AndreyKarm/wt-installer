@@ -11,18 +11,18 @@ Module `liotom/installer` (the name differs from the repo name).
 
 | Path | Purpose |
 |---|---|
-| `cmd/wt-installer/main.go` | Entry point. `logging.Init()`, single-instance mutex (`WTInstallerServer`), `gamedirs.Refresh()`, tray menu (Auto-start toggle, update status, Quit), starts `server.Start()` and the update check. The generated `rsrc.syso` (exe icon) must be in this folder. |
+| `cmd/wt-installer/main.go` | Entry point. `logging.Init()`, single-instance mutex (`WTInstallerServer`), `gamedirs.Refresh()`, tray menu (Auto-start toggle, update status, open skins/sights/logs folder, Quit), starts `server.Start()` and the update check. The generated `rsrc.syso` (exe icon) must be in this folder. |
 | `internal/app` | Shared constants: `Name` (also the auto-start registry value name), `Version`, `Port`. |
-| `internal/server` | HTTP server and handlers, CORS/origin allow-list (`isAllowedOrigin`, tested in `server_test.go`). |
-| `internal/installer` | `DownloadSkin` / `DownloadSight`. Archives are downloaded and extracted to a temp folder first (`downloadAndExtract` → `extractArchive`), then copied into place (`copyTree`). Includes Windows path sanitizing, zip-slip check, folder dedup for skins, per-file dedup for sights, and fallback to external `7z`/`tar` for compression methods Go can't read (LZMA, PPMd, Deflate64). BZip2 is registered natively. `installer_test.go` covers install/dedup, recording, bad downloads and path traversal. |
-| `internal/installed` | Remembers installed posts in `%APPDATA%\WTInstaller\installed.json` (post id → type, time, and the skin folders or sight files it went to). `Status()` reports only posts with at least one path still on disk. |
-| `internal/gamedirs` | Finds game installs: Gaijin Launcher (`HKCU\SOFTWARE\Gaijin\WarThunder\InstallDir`) and Steam (parses `libraryfolders.vdf` for app ID `236390`). `CamoDirs()` returns `<game>\UserSkins`. `SightDirs()` returns `Documents\My Games\WarThunder\Saves\<numeric id>\production\UserSights\all_tanks`. |
+| `internal/server` | HTTP server and handlers, CORS/origin allow-list (`isAllowedOrigin`), `OpenFolder(target)` shared by `/openfolder` and the tray menu. `server_test.go` tests the origin check and bad-request handling. |
+| `internal/installer` | `DownloadSkin` / `DownloadSight`. Archives are downloaded and extracted to a temp folder first (`downloadAndExtract` → `extractArchive`), then copied into place (`copyTree`). Includes Windows path sanitizing, zip-slip check, folder dedup for skins, per-file dedup for sights, and fallback to external `7z`/`tar` for compression methods Go can't read (LZMA, PPMd, Deflate64). BZip2 is registered natively. Also `Uninstall(postId)`. `installer_test.go` covers install/dedup, recording, uninstall, host allow-list, size caps, bad downloads and path traversal. |
+| `internal/installed` | Remembers installed posts in `%APPDATA%\WTInstaller\installed.json` (post id → type, time, and the skin folders or sight files it went to). `Status()` reports only posts with at least one path still on disk. `Lookup()` also returns which paths other posts share; `Remove()` forgets a post. |
+| `internal/gamedirs` | (`gamedirs_test.go` covers the VDF parser.) Finds game installs: Gaijin Launcher (`HKCU\SOFTWARE\Gaijin\WarThunder\InstallDir`) and Steam (parses `libraryfolders.vdf` for app ID `236390`). `CamoDirs()` returns `<game>\UserSkins`. `SightDirs()` returns `Documents\My Games\WarThunder\Saves\<numeric id>\production\UserSights\all_tanks`. |
 | `internal/update` | Self-update from GitHub Releases (`AndreyKarm/wt-installer`). `Check()` compares the latest tag with `app.Version`. `Apply()` downloads the `.exe` asset and starts a hidden `_update.bat` that swaps it in; the caller then quits the tray. |
 | `internal/logging` | Logs to `%TEMP%\WTInstallerLogs\wtinstaller-<timestamp>.log` and to an in-memory buffer (200 entries) served at `/logs`. Prunes logs older than 7 days. `OpenFolder()` opens the log folder at most once per run. |
 | `internal/winutil` | `OpenInExplorer` (ShellExecute), `ExecutablePath`, auto-start via `HKCU\...\CurrentVersion\Run`. |
 | `media/` | `icon.png` (source), `icon.ico` (generated, committed) and `media.go`, which embeds the icon as `media.Icon`. |
 | `extension/content.js` | Content script on live.warthunder.com: adds buttons to feed items (`.feed_item[post_id]`) and the lightbox (`#clb .wrapper[post_id]`) through `MutationObserver`s. Shows toasts. |
-| `extension/background.js` | Relays content-script messages (`wt_install`, `wt_installed`, `wt_server_version`, `wt_open_folder`, `wt_*_log*`) to the server and keeps extension logs in memory. |
+| `extension/background.js` | Relays content-script messages (`wt_install`, `wt_uninstall`, `wt_installed`, `wt_server_version`, `wt_open_folder`, `wt_*_log*`) to the server and keeps extension logs in memory. |
 | `extension/popup/` | Popup: extension and server versions, buttons to open folders, server and extension log viewer. |
 | `build.bat`, `archive.bat` | Local build script and the script that zips the extension. |
 | `.github/workflows/release.yml` | Builds and uploads `WT Installer.exe` when a GitHub release is created. |
@@ -35,6 +35,7 @@ Package dependencies flow one way: `cmd` → `server` → `installer` → `gamed
 - `GET /version` returns `Version: x.y.z` (the extension strips the prefix)
 - `POST /download` with JSON `{type: "camo"|"sight", postId, fileUrl}`. Returns a plain-text summary (for example "Installed as tiger_2"), which the extension shows in its toast.
 - `GET /installed` returns `{"<postId>": "camo"|"sight"}` for installed posts whose files still exist. The content script uses it to mark buttons as "✓ Installed".
+- `POST /uninstall` with JSON `{postId}` deletes what that post installed and forgets it. Returns a plain-text summary.
 - `POST /openfolder?target=camo|sight|installer|logs` opens one Explorer window per matching folder.
 - `GET /logs` (JSON array of `{time, message}`), `POST /logs/clear`
 
@@ -52,6 +53,7 @@ go build -o wt-installer.exe ./cmd/wt-installer
 - Release-style build: `build.bat`. It needs ImageMagick (`magick`), `rsrc` (`go install github.com/akavel/rsrc@latest`) and `upx` on PATH. It turns `media/icon.png` into `media/icon.ico`, creates `cmd/wt-installer/rsrc.syso`, builds with `-ldflags "-s -w -H=windowsgui"` to `WT Installer.exe` in the repo root, then compresses it with UPX. It stops on the first failed step.
 - Only one instance can run (named mutex). Quit the running tray app before starting a new build.
 - Check changes with `go vet ./...` and `go test ./...`. The tests use `httptest` and temp folders and never touch the real game folders.
+- If the installed WT Installer is running, a new build exits at once (single-instance mutex), and anything on port 4316 is answered by the running copy. Quit it from the tray before smoke-testing a build.
 - A local build whose `app.Version` is lower than the latest GitHub release updates itself as soon as it starts. Keep `Version` in sync with the latest release when running test builds.
 
 ### Extension
@@ -63,8 +65,8 @@ go build -o wt-installer.exe ./cmd/wt-installer
 ### Release
 
 1. Bump `Version` in `internal/app/app.go`.
-2. Create a GitHub release whose tag is that version (with or without `v`; `compareVersions` strips it). The tag must match `Version`: a release whose exe reports a lower version makes clients update in a loop.
-3. CI attaches `WT Installer.exe`, and running clients update themselves on their next start. The extension version is set separately in `extension/manifest.json`.
+2. Create a GitHub release whose tag is that version (with or without `v`; `compareVersions` strips it). The tag must match `Version`, because a release whose exe reports a lower version makes clients update in a loop. CI enforces this and fails the build otherwise.
+3. CI runs `go vet` and `go test`, builds with `CGO_ENABLED=0` (no C toolchain needed), compresses with UPX and attaches `WT Installer.exe`, and running clients update themselves on their next start. The extension version is set separately in `extension/manifest.json`.
 
 ## Conventions
 
@@ -83,6 +85,11 @@ go build -o wt-installer.exe ./cmd/wt-installer
   - Skins install into **every** detected game dir, sights into **every** numeric Saves folder.
   - Every successful install, including "already installed" outcomes, is recorded through `recordInstall` (`installed.Add`). A failure to record is only logged. Installer tests stub `recordInstall` in `TestMain` so they never write to the real store.
   - Check the HTTP status of every download, and use an `http.Client` with a timeout (`downloadClient` in `installer`, `httpClient` in `update`) instead of `http.Get`.
+  - Downloads must be https on `warthunder.com` or a subdomain (`allowDownloadURL`), checked on every redirect hop. Site links are `https://live.warthunder.com/dl/<hash>/` and redirect to `cdn-live.warthunder.com`.
+  - Size caps: 512 MiB download, 4 GiB extracted, 20,000 entries (`maxArchiveBytes`, `maxExtractedBytes`, `maxArchiveFiles`). The site caps skin/sight uploads at 300 MB. Native extraction enforces the byte cap on the stream; the external-extractor fallback checks the total afterwards.
+  - The fallback extractor finds 7-Zip on PATH, through its registry key, or in Program Files (`find7z`), then falls back to `tar`.
+  - `Uninstall` only deletes recorded paths that sit in a detected game folder: a skin folder directly inside `UserSkins`, or a sight file inside an `all_tanks` folder. It keeps paths another recorded post shares.
+  - Tests swap the hooks (`listCamoDirs`, `listSightDirs`, `recordInstall`, `lookupInstall`, `forgetInstall`, `allowDownloadURL`, the size caps). `TestMain` in `installer` stubs recording and allows the local `httptest` hosts.
   - Open folders with `winutil.OpenInExplorer` (ShellExecute), not `cmd /c start`. Hide windows of external processes with `SysProcAttr{HideWindow: true}`.
   - Doc comments are short and say why the code does something (for example, why there is a fallback extractor).
 - **Extension**
@@ -90,6 +97,7 @@ go build -o wt-installer.exe ./cmd/wt-installer
   - Message actions use a `wt_` prefix. Injected DOM ids and classes use `wt-local-` / `local-dl-btn`.
   - The content script never calls the server directly; requests go through `background.js`. The popup calls the server directly.
   - Log through `wtLog()` in the content script so entries show up in the popup's Extension tab.
+  - `createDownloadButtons()` returns the install button and its "✕" uninstall button. Callers insert both. The ✕ shows only for installed posts and asks for confirmation before uninstalling.
   - Button idle state is drawn only by `renderIdle()` from `installedPosts`. The list is refreshed on load and whenever the tab becomes visible, and kept as-is when the server is offline.
 - **The port `4316` is hard-coded** in `internal/app/app.go`, `extension/background.js`, `extension/popup/popup.js` and `manifest.json` `host_permissions`. Change all four together.
 - Generated or build outputs (`*.exe`, `rsrc.syso`, `*.zip`) are gitignored. `media/icon.ico` is committed because `media.go` embeds it.

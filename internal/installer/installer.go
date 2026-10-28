@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/windows/registry"
+
 	"liotom/installer/internal/gamedirs"
 	"liotom/installer/internal/installed"
 	"liotom/installer/internal/logging"
@@ -34,6 +36,8 @@ var (
 	refreshGameDirs = gamedirs.Refresh
 	listSightDirs   = gamedirs.SightDirs
 	recordInstall   = installed.Add
+	lookupInstall   = installed.Lookup
+	forgetInstall   = installed.Remove
 )
 
 // remember records a finished install for the "already installed" marks.
@@ -44,7 +48,41 @@ func remember(postId int, kind string, paths []string) {
 	}
 }
 
-var downloadClient = &http.Client{Timeout: 5 * time.Minute}
+// Size caps against broken or malicious archives. War Thunder Live caps
+// skin/sight uploads at 300 MB, so real archives stay well under these.
+// Variables so tests can lower them.
+var (
+	maxArchiveBytes   int64 = 512 << 20
+	maxExtractedBytes int64 = 4 << 30
+	maxArchiveFiles         = 20000
+)
+
+// allowDownloadURL limits downloads to War Thunder hosts. Every link on the
+// site is https://live.warthunder.com/dl/<hash>/, which redirects to
+// cdn-live.warthunder.com; each redirect hop is checked too. A variable so
+// tests can allow their local server.
+var allowDownloadURL = isWarThunderURL
+
+func isWarThunderURL(u *url.URL) bool {
+	host := strings.ToLower(u.Hostname())
+	return u.Scheme == "https" &&
+		(host == "warthunder.com" || strings.HasSuffix(host, ".warthunder.com"))
+}
+
+var downloadClient = &http.Client{
+	Timeout: 5 * time.Minute,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		if !allowDownloadURL(req.URL) {
+			return fmt.Errorf("redirect to disallowed host %s", req.URL.Host)
+		}
+		return nil
+	},
+}
+
+var errTooLarge = fmt.Errorf("archive is too large")
 
 // DownloadSkin downloads a skin and installs it into every detected
 // UserSkins directory. If a skin folder with the same name already exists,
@@ -240,6 +278,10 @@ func fetchArchive(fileUrl, prefix string) (string, error) {
 		log.Printf("Invalid file URL: %q\n", fileUrl)
 		return "", fmt.Errorf("invalid file URL: %q", fileUrl)
 	}
+	if !allowDownloadURL(u) {
+		log.Printf("Refusing download from %s\n", u.Host)
+		return "", fmt.Errorf("downloads are only allowed from War Thunder sites, not %s", u.Host)
+	}
 
 	resp, err := downloadClient.Get(fileUrl)
 	if err != nil {
@@ -251,19 +293,27 @@ func fetchArchive(fileUrl, prefix string) (string, error) {
 		log.Printf("Download failed: %s returned %s\n", fileUrl, resp.Status)
 		return "", fmt.Errorf("download failed: server returned %s", resp.Status)
 	}
+	if resp.ContentLength > maxArchiveBytes {
+		log.Printf("Download too large: %d bytes\n", resp.ContentLength)
+		return "", errTooLarge
+	}
 
 	tmpFile, err := os.CreateTemp("", prefix+"-*.zip")
 	if err != nil {
 		log.Printf("Temp file error: %v\n", err)
 		return "", fmt.Errorf("temp file error: %w", err)
 	}
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
+	// Content-Length can be missing or wrong, so cap the copy itself.
+	n, err := io.Copy(tmpFile, io.LimitReader(resp.Body, maxArchiveBytes+1))
+	tmpFile.Close()
+	if err == nil && n > maxArchiveBytes {
+		err = errTooLarge
+	}
+	if err != nil {
 		os.Remove(tmpFile.Name())
 		log.Printf("Write error: %v\n", err)
 		return "", fmt.Errorf("write error: %w", err)
 	}
-	tmpFile.Close()
 	return tmpFile.Name(), nil
 }
 
@@ -294,11 +344,45 @@ func hasUnsupportedMethod(r *zip.ReadCloser) (uint16, bool) {
 	return 0, false
 }
 
+// find7z locates 7z.exe. The 7-Zip installer doesn't add itself to PATH,
+// so besides PATH this checks the install dir it records in the registry
+// and the default Program Files folders.
+func find7z() (string, bool) {
+	if p, err := exec.LookPath("7z"); err == nil {
+		return p, true
+	}
+	var dirs []string
+	for _, root := range []registry.Key{registry.LOCAL_MACHINE, registry.CURRENT_USER} {
+		k, err := registry.OpenKey(root, `SOFTWARE\7-Zip`, registry.QUERY_VALUE|registry.WOW64_64KEY)
+		if err != nil {
+			continue
+		}
+		for _, name := range []string{"Path64", "Path"} {
+			if v, _, err := k.GetStringValue(name); err == nil && v != "" {
+				dirs = append(dirs, v)
+			}
+		}
+		k.Close()
+	}
+	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
+		if v := os.Getenv(env); v != "" {
+			dirs = append(dirs, filepath.Join(v, "7-Zip"))
+		}
+	}
+	for _, dir := range dirs {
+		p := filepath.Join(dir, "7z.exe")
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // runExternalUnzip tries 7-Zip, then tar (bsdtar on Windows 10 1803+/macOS
 // ships built-in and supports more zip compression methods than Go's
 // stdlib), extracting src fully into destDir.
 func runExternalUnzip(src, destDir string) error {
-	if p, err := exec.LookPath("7z"); err == nil {
+	if p, ok := find7z(); ok {
 		cmd := exec.Command(p, "x", "-y", "-o"+destDir, src)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		if err := cmd.Run(); err == nil {
@@ -324,6 +408,10 @@ func extractArchive(src, dest string) error {
 	}
 	defer r.Close()
 
+	if len(r.File) > maxArchiveFiles {
+		return fmt.Errorf("%w: %d entries", errTooLarge, len(r.File))
+	}
+
 	if method, unsupported := hasUnsupportedMethod(r); unsupported {
 		log.Printf(
 			"Archive uses unsupported compression method %d, falling back to external extractor\n",
@@ -337,10 +425,20 @@ func extractArchive(src, dest string) error {
 		if err := runExternalUnzip(src, rawDir); err != nil {
 			return err
 		}
+		// The external tool can't be capped mid-way, so check afterwards
+		// before copying anything into place.
+		size, err := treeSize(rawDir)
+		if err != nil {
+			return err
+		}
+		if size > maxExtractedBytes {
+			return fmt.Errorf("%w: %d bytes extracted", errTooLarge, size)
+		}
 		_, err = copyTree(rawDir, dest, false)
 		return err
 	}
 
+	budget := maxExtractedBytes
 	cleanDest := filepath.Clean(dest)
 	for _, f := range r.File {
 		name := sanitizeWindowsPath(strings.TrimSuffix(filepath.ToSlash(f.Name), "/"))
@@ -362,17 +460,37 @@ func extractArchive(src, dest string) error {
 		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
 			return err
 		}
-		if err := writeZipFile(f, fpath); err != nil {
+		n, err := writeZipFile(f, fpath, budget)
+		if err != nil {
 			return err
 		}
+		budget -= n
 	}
 	return nil
 }
 
-func writeZipFile(f *zip.File, path string) error {
+// treeSize sums the sizes of all files under dir.
+func treeSize(dir string) (int64, error) {
+	var total int64
+	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+// writeZipFile extracts f to path, writing at most budget bytes. The
+// limit is enforced on the actual stream since sizes in the zip header can
+// be forged (zip bombs).
+func writeZipFile(f *zip.File, path string, budget int64) (int64, error) {
 	rc, err := f.Open()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer rc.Close()
 
@@ -380,13 +498,18 @@ func writeZipFile(f *zip.File, path string) error {
 	// which on Windows would block reinstalling over the file later.
 	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if _, err := io.Copy(out, rc); err != nil {
+	n, err := io.Copy(out, io.LimitReader(rc, budget+1))
+	if err != nil {
 		out.Close()
-		return err
+		return n, err
 	}
-	return out.Close()
+	if n > budget {
+		out.Close()
+		return n, fmt.Errorf("%w: extracted content exceeds %d bytes", errTooLarge, maxExtractedBytes)
+	}
+	return n, out.Close()
 }
 
 // isJunkEntry reports archive entries that are OS metadata, not content.
@@ -544,18 +667,90 @@ func dedupeTargetPath(target string, newData []byte) (finalPath string, skip boo
 	}
 }
 
-// DeleteSkin removes a skin folder from every detected CamoDir by name.
-func DeleteSkin(name string) {
-	go func() {
-		for _, dir := range listCamoDirs() {
-			path := filepath.Join(dir, name)
-			if err := os.RemoveAll(path); err != nil {
-				log.Printf("Delete error for %s in %s: %v\n", name, dir, err)
-				continue
-			}
-			log.Printf("Deleted skin: %s from %s\n", name, dir)
+// Uninstall deletes what postId installed and forgets the record. Only
+// recorded paths are touched, and only where they sit in a detected game
+// folder: a skin folder directly inside UserSkins, a sight file inside an
+// all_tanks folder. A hand-edited installed.json therefore can't make it
+// delete anything else. Paths another recorded post also uses are kept.
+func Uninstall(postId int) (string, error) {
+	installMu.Lock()
+	defer installMu.Unlock()
+
+	rec, shared, ok, err := lookupInstall(postId)
+	if err != nil {
+		log.Printf("Uninstall %d: %v\n", postId, err)
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("post %d is not installed", postId)
+	}
+
+	if rec.Type == "camo" && len(listCamoDirs()) == 0 {
+		refreshGameDirs()
+	}
+	sightDirs, _ := listSightDirs()
+
+	var removed, kept int
+	for _, p := range rec.Paths {
+		switch {
+		case shared[p]:
+			log.Printf("Keeping %s, another installed post uses it", p)
+			kept++
+			continue
+		case rec.Type == "camo" && !isChildOf(p, listCamoDirs(), true):
+			log.Printf("Not removing %s: not in a UserSkins folder", p)
+			kept++
+			continue
+		case rec.Type == "sight" && !isChildOf(p, sightDirs, false):
+			log.Printf("Not removing %s: not in a sights folder", p)
+			kept++
+			continue
+		case rec.Type != "camo" && rec.Type != "sight":
+			kept++
+			continue
 		}
-	}()
+		if err := os.RemoveAll(p); err != nil {
+			log.Printf("Uninstall %d: remove %s: %v\n", postId, p, err)
+			return "", fmt.Errorf("remove %s: %w", p, err)
+		}
+		log.Printf("Removed %s", p)
+		removed++
+	}
+
+	if err := forgetInstall(postId); err != nil {
+		log.Printf("Uninstall %d: forget record: %v\n", postId, err)
+		return "", err
+	}
+
+	what := "folder(s)"
+	if rec.Type == "sight" {
+		what = "file(s)"
+	}
+	msg := fmt.Sprintf("Removed %d %s", removed, what)
+	if kept > 0 {
+		msg += fmt.Sprintf(", kept %d still in use or outside the game folders", kept)
+	}
+	return msg, nil
+}
+
+// isChildOf reports whether path is inside one of dirs: directly inside
+// when direct is true, at any depth otherwise. The dir itself never counts.
+func isChildOf(path string, dirs []string, direct bool) bool {
+	clean := filepath.Clean(path)
+	for _, d := range dirs {
+		d = filepath.Clean(d)
+		if direct {
+			if strings.EqualFold(filepath.Dir(clean), d) {
+				return true
+			}
+			continue
+		}
+		rel, err := filepath.Rel(d, clean)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // joinUnique joins notes with "; ", dropping repeats (the same outcome in
