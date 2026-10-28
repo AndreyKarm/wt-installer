@@ -61,6 +61,31 @@ func TestDownloadRejectsDisallowedHostsAndRedirects(t *testing.T) {
 	}
 }
 
+// Bad links must be refused by the link check even on a machine without
+// War Thunder (like CI), not by whichever folder lookup fails first.
+func TestBadURLRejectedWithoutGameFolders(t *testing.T) {
+	oldCamo, oldRefresh, oldSights, oldAllow := listCamoDirs, refreshGameDirs, listSightDirs, allowDownloadURL
+	listCamoDirs = func() []string { return nil }
+	refreshGameDirs = func() {}
+	listSightDirs = func() ([]string, error) { return nil, errors.New("no Saves folder") }
+	allowDownloadURL = isWarThunderURL
+	t.Cleanup(func() {
+		listCamoDirs, refreshGameDirs, listSightDirs, allowDownloadURL = oldCamo, oldRefresh, oldSights, oldAllow
+	})
+
+	for _, u := range []string{"https://example.com/x.zip", "http://live.warthunder.com/dl/x/"} {
+		if _, err := DownloadSkin(1, u); err == nil || !strings.Contains(err.Error(), "only allowed from War Thunder") {
+			t.Errorf("skin %s: %v", u, err)
+		}
+		if _, err := DownloadSight(1, u); err == nil || !strings.Contains(err.Error(), "only allowed from War Thunder") {
+			t.Errorf("sight %s: %v", u, err)
+		}
+	}
+	if _, err := DownloadSight(1, "not a url"); err == nil || !strings.Contains(err.Error(), "invalid file URL") {
+		t.Errorf("garbage URL: %v", err)
+	}
+}
+
 func TestSizeLimits(t *testing.T) {
 	withCamoDir(t)
 	big := strings.Repeat("x", 4096)

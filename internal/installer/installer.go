@@ -91,6 +91,10 @@ var errTooLarge = fmt.Errorf("archive is too large")
 // installed under name_2, name_3, ... so an unrelated skin is never
 // overwritten. Returns a short human-readable summary.
 func DownloadSkin(postId int, fileUrl string) (string, error) {
+	if err := checkDownloadURL(fileUrl); err != nil {
+		return "", err
+	}
+
 	installMu.Lock()
 	defer installMu.Unlock()
 
@@ -184,6 +188,10 @@ func installSkinFolder(srcDir, destBase, name string) (note, folder string, err 
 // compared to the incoming file: identical content is left untouched,
 // while differing content is written under name_2, name_3, etc.
 func DownloadSight(postId int, fileUrl string) (string, error) {
+	if err := checkDownloadURL(fileUrl); err != nil {
+		return "", err
+	}
+
 	installMu.Lock()
 	defer installMu.Unlock()
 
@@ -271,18 +279,25 @@ func downloadAndExtract(fileUrl, prefix string) (srcDir, root string, cleanup fu
 	return srcDir, root, cleanup, nil
 }
 
-// fetchArchive downloads fileUrl into a temp file and returns its path.
-func fetchArchive(fileUrl, prefix string) (string, error) {
+// checkDownloadURL rejects links that aren't http(s) on an allowed host.
+// Installs call it before anything else, so a bad link is refused the
+// same way whether or not the game folders exist.
+func checkDownloadURL(fileUrl string) error {
 	u, err := url.Parse(fileUrl)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		log.Printf("Invalid file URL: %q\n", fileUrl)
-		return "", fmt.Errorf("invalid file URL: %q", fileUrl)
+		return fmt.Errorf("invalid file URL: %q", fileUrl)
 	}
 	if !allowDownloadURL(u) {
 		log.Printf("Refusing download from %s\n", u.Host)
-		return "", fmt.Errorf("downloads are only allowed from War Thunder sites, not %s", u.Host)
+		return fmt.Errorf("downloads are only allowed from War Thunder sites, not %s", u.Host)
 	}
+	return nil
+}
 
+// fetchArchive downloads fileUrl (already checked by checkDownloadURL)
+// into a temp file and returns its path.
+func fetchArchive(fileUrl, prefix string) (string, error) {
 	resp, err := downloadClient.Get(fileUrl)
 	if err != nil {
 		log.Printf("Download failed: %v\n", err)

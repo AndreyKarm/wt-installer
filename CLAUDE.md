@@ -53,6 +53,7 @@ go build -o wt-installer.exe ./cmd/wt-installer
 - Release-style build: `build.bat`. It needs ImageMagick (`magick`), `rsrc` (`go install github.com/akavel/rsrc@latest`) and `upx` on PATH. It turns `media/icon.png` into `media/icon.ico`, creates `cmd/wt-installer/rsrc.syso`, builds with `-ldflags "-s -w -H=windowsgui"` to `WT Installer.exe` in the repo root, then compresses it with UPX. It stops on the first failed step.
 - Only one instance can run (named mutex). Quit the running tray app before starting a new build.
 - Check changes with `go vet ./...` and `go test ./...`. The tests use `httptest` and temp folders and never touch the real game folders.
+- The CI runner has no War Thunder install, so tests must not depend on this machine's game or Saves folders. To reproduce CI locally, run the tests with an empty profile: set `$env:USERPROFILE` to an empty temp folder, then run `go test ./...`.
 - If the installed WT Installer is running, a new build exits at once (single-instance mutex), and anything on port 4316 is answered by the running copy. Quit it from the tray before smoke-testing a build.
 - A local build whose `app.Version` is lower than the latest GitHub release updates itself as soon as it starts. Keep `Version` in sync with the latest release when running test builds.
 
