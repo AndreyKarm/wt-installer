@@ -1,4 +1,6 @@
-package main
+// Package installer downloads skin and sight archives and installs them
+// into the game folders without overwriting existing content.
+package installer
 
 import (
 	"archive/zip"
@@ -16,11 +18,21 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"liotom/installer/internal/gamedirs"
+	"liotom/installer/internal/logging"
 )
 
 // installMu serializes installs so two concurrent downloads can't race on
 // picking the same free "_2" folder or file name.
 var installMu sync.Mutex
+
+// Where installs go. Variables so tests can point them at temp folders.
+var (
+	listCamoDirs    = gamedirs.CamoDirs
+	refreshGameDirs = gamedirs.Refresh
+	listSightDirs   = gamedirs.SightDirs
+)
 
 var downloadClient = &http.Client{Timeout: 5 * time.Minute}
 
@@ -34,20 +46,20 @@ func DownloadSkin(postId int, fileUrl string) (string, error) {
 	installMu.Lock()
 	defer installMu.Unlock()
 
-	camoDirs := getCamoDirs()
+	camoDirs := listCamoDirs()
 	if len(camoDirs) == 0 {
-		RefreshGameDirs()
-		camoDirs = getCamoDirs()
+		refreshGameDirs()
+		camoDirs = listCamoDirs()
 		if len(camoDirs) == 0 {
 			log.Printf("No camo directories found\n")
-			openLogsFolder()
+			logging.OpenFolder()
 			return "", fmt.Errorf("no camo directories found")
 		}
 	}
 
 	srcDir, root, cleanup, err := downloadAndExtract(fileUrl, "wtskin")
 	if err != nil {
-		openLogsFolder()
+		logging.OpenFolder()
 		return "", err
 	}
 	defer cleanup()
@@ -61,13 +73,13 @@ func DownloadSkin(postId int, fileUrl string) (string, error) {
 	for _, dir := range camoDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("mkdir %s: %v\n", dir, err)
-			openLogsFolder()
+			logging.OpenFolder()
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		note, err := installSkinFolder(srcDir, dir, name)
 		if err != nil {
 			log.Printf("Install error for %d in %s: %v\n", postId, dir, err)
-			openLogsFolder()
+			logging.OpenFolder()
 			return "", fmt.Errorf("install error for %d in %s: %w", postId, dir, err)
 		}
 		notes = append(notes, note)
@@ -124,16 +136,16 @@ func DownloadSight(postId int, fileUrl string) (string, error) {
 	installMu.Lock()
 	defer installMu.Unlock()
 
-	sightDirs, err := GetSightDirs()
+	sightDirs, err := listSightDirs()
 	if err != nil || len(sightDirs) == 0 {
 		log.Printf("could not locate sight directories: %v\n", err)
-		openLogsFolder()
+		logging.OpenFolder()
 		return "", fmt.Errorf("could not locate sight directories: %v", err)
 	}
 
 	srcDir, _, cleanup, err := downloadAndExtract(fileUrl, "wtsight")
 	if err != nil {
-		openLogsFolder()
+		logging.OpenFolder()
 		return "", err
 	}
 	defer cleanup()
@@ -142,13 +154,13 @@ func DownloadSight(postId int, fileUrl string) (string, error) {
 	for _, dir := range sightDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("mkdir %s: %v\n", dir, err)
-			openLogsFolder()
+			logging.OpenFolder()
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		stats, err := copyTree(srcDir, dir, true)
 		if err != nil {
 			log.Printf("install sight %d to %s: %v\n", postId, dir, err)
-			openLogsFolder()
+			logging.OpenFolder()
 			return "", fmt.Errorf("install to %s: %w", dir, err)
 		}
 		total.written += stats.written
@@ -514,7 +526,7 @@ func dedupeTargetPath(target string, newData []byte) (finalPath string, skip boo
 // DeleteSkin removes a skin folder from every detected CamoDir by name.
 func DeleteSkin(name string) {
 	go func() {
-		for _, dir := range getCamoDirs() {
+		for _, dir := range listCamoDirs() {
 			path := filepath.Join(dir, name)
 			if err := os.RemoveAll(path); err != nil {
 				log.Printf("Delete error for %s in %s: %v\n", name, dir, err)

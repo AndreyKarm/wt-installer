@@ -1,8 +1,11 @@
 @echo off
 
 set EXE_NAME=WT Installer.exe
+rem Go only links .syso files from the main package's folder.
+set RSRC=cmd\wt-installer\rsrc.syso
 
 echo Cleaning old resources...
+if exist "%RSRC%" del "%RSRC%"
 if exist rsrc.syso del rsrc.syso
 
 echo Cleaning old executable...
@@ -34,7 +37,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Generating resources from icon...
-rsrc -ico media\icon.ico -o rsrc.syso
+rsrc -ico media\icon.ico -o "%RSRC%"
 
 if %errorlevel% neq 0 (
   echo ERROR: rsrc generation failed.
@@ -43,15 +46,16 @@ if %errorlevel% neq 0 (
 )
 
 echo Starting build process...
-go build -ldflags "-s -w -H=windowsgui" -v -o "%EXE_NAME%"
+go build -ldflags "-s -w -H=windowsgui" -v -o "%EXE_NAME%" ./cmd/wt-installer
 
-if %errorlevel% equ 0 (
-  echo Build successful!
-) else (
+if %errorlevel% neq 0 (
   echo Build failed.
+  pause
+  exit /b 1
 )
+echo Build successful!
 
 echo Compressing using UPX...
-upx --best --lzma "WT Installer.exe"
+upx --best --lzma "%EXE_NAME%"
 
 pause

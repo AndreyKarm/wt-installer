@@ -28,7 +28,7 @@ jobs:
         run: go install github.com/akavel/rsrc@latest
 
       - name: Generate icon resource
-        run: rsrc -ico media/icon.ico -o rsrc.syso
+        run: rsrc -ico media/icon.ico -o cmd/wt-installer/rsrc.syso
 
       - name: Build
         env:
@@ -37,7 +37,7 @@ jobs:
         run: >
           go build
           -ldflags="-s -w -H=windowsgui"
-          -o "WT Installer.exe" .
+          -o "WT Installer.exe" ./cmd/wt-installer
 
       - name: Install UPX
         run: choco install upx -y

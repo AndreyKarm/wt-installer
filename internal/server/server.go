@@ -1,56 +1,26 @@
-package main
+// Package server is the local HTTP API used by the browser extension.
+package server
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
+
+	"liotom/installer/internal/app"
+	"liotom/installer/internal/gamedirs"
+	"liotom/installer/internal/installer"
+	"liotom/installer/internal/logging"
+	"liotom/installer/internal/winutil"
 )
-
-type LogEntry struct {
-	Time    string `json:"time"`
-	Message string `json:"message"`
-}
-
-type logCapture struct{ io.Writer }
 
 type PostRequest struct {
 	Type    string `json:"type"`
 	PostId  int    `json:"postId"`
 	FileUrl string `json:"fileUrl"`
-}
-
-const (
-	Port    = 4316
-	Version = "0.1.7"
-)
-
-var (
-	logBuffer []LogEntry
-	logMu     sync.Mutex
-)
-
-func init() {
-	ensureFileLogging()
-}
-
-func (lc *logCapture) Write(p []byte) (int, error) {
-	logMu.Lock()
-	logBuffer = append(logBuffer, LogEntry{
-		Time:    time.Now().Format("15:04:05"),
-		Message: string(p),
-	})
-	if len(logBuffer) > 200 {
-		logBuffer = logBuffer[1:]
-	}
-	logMu.Unlock()
-	return lc.Writer.Write(p)
 }
 
 // isAllowedOrigin limits callers to the extension and War Thunder Live.
@@ -93,7 +63,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func versionHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Version: %s", Version)
+	fmt.Fprintf(w, "Version: %s", app.Version)
 }
 
 func openFolderHandler(w http.ResponseWriter, r *http.Request) {
@@ -107,10 +77,10 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 	var paths []string
 	switch target {
 	case "camo":
-		paths = getCamoDirs()
+		paths = gamedirs.CamoDirs()
 		if len(paths) == 0 {
-			RefreshGameDirs()
-			paths = getCamoDirs()
+			gamedirs.Refresh()
+			paths = gamedirs.CamoDirs()
 		}
 		if len(paths) == 0 {
 			log.Printf("Camo folder not found\n")
@@ -118,7 +88,7 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "sight":
-		sightDirs, err := GetSightDirs()
+		sightDirs, err := gamedirs.SightDirs()
 		if err != nil || len(sightDirs) == 0 {
 			log.Printf("Sight folder not found: %v\n", err)
 			http.Error(w, "Sight folder not found", http.StatusInternalServerError)
@@ -126,14 +96,14 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		paths = sightDirs
 	case "installer":
-		paths = []string{filepath.Dir(getExecutablePath())}
+		paths = []string{filepath.Dir(winutil.ExecutablePath())}
 	case "logs":
-		if LogDir == "" {
+		if logging.Dir() == "" {
 			log.Printf("Log folder not found\n")
 			http.Error(w, "Log folder not found", http.StatusInternalServerError)
 			return
 		}
-		paths = []string{LogDir}
+		paths = []string{logging.Dir()}
 	default:
 		log.Printf("Invalid target: %s\n", target)
 		http.Error(w, "Invalid target", http.StatusBadRequest)
@@ -148,7 +118,7 @@ func openFolderHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("mkdir %s: %v\n", path, err)
 		}
 		log.Printf("Opening %s folder: %s\n", target, path)
-		if err := openInExplorer(path); err != nil {
+		if err := winutil.OpenInExplorer(path); err != nil {
 			log.Printf("Open folder %s: %v\n", path, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -179,9 +149,9 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	switch body.Type {
 	case "camo":
-		summary, err = DownloadSkin(body.PostId, body.FileUrl)
+		summary, err = installer.DownloadSkin(body.PostId, body.FileUrl)
 	case "sight":
-		summary, err = DownloadSight(body.PostId, body.FileUrl)
+		summary, err = installer.DownloadSight(body.PostId, body.FileUrl)
 	default:
 		log.Printf("Invalid type: %s\n", body.Type)
 		http.Error(w, "Invalid type", http.StatusBadRequest)
@@ -197,7 +167,9 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, summary)
 }
 
-func startServer() {
+// Start serves the API on 127.0.0.1:app.Port. It blocks, so run it in a
+// goroutine.
+func Start() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", healthHandler)
@@ -205,9 +177,7 @@ func startServer() {
 	mux.HandleFunc("/openfolder", openFolderHandler)
 	mux.HandleFunc("/download", downloadHandler)
 	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
-		logMu.Lock()
-		json.NewEncoder(w).Encode(logBuffer)
-		logMu.Unlock()
+		json.NewEncoder(w).Encode(logging.Entries())
 	})
 
 	mux.HandleFunc("/logs/clear", func(w http.ResponseWriter, r *http.Request) {
@@ -215,14 +185,12 @@ func startServer() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		logMu.Lock()
-		logBuffer = nil
-		logMu.Unlock()
+		logging.Clear()
 		fmt.Fprint(w, "OK")
 	})
 
-	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", Port), corsMiddleware(mux)); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", app.Port), corsMiddleware(mux)); err != nil {
 		log.Printf("Server error: %v", err)
-		openLogsFolder()
+		logging.OpenFolder()
 	}
 }

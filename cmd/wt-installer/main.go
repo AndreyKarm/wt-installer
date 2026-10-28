@@ -1,3 +1,8 @@
+// Command wt-installer is the tray app: it runs the local HTTP server used
+// by the browser extension and keeps itself up to date.
+//
+// build.bat and CI generate rsrc.syso (the exe icon) in this folder; Go only
+// links .syso files from the main package directory.
 package main
 
 import (
@@ -7,12 +12,18 @@ import (
 
 	"fyne.io/systray"
 	"golang.org/x/sys/windows"
+
+	"liotom/installer/internal/app"
+	"liotom/installer/internal/gamedirs"
+	"liotom/installer/internal/logging"
+	"liotom/installer/internal/server"
+	"liotom/installer/internal/update"
+	"liotom/installer/internal/winutil"
+	"liotom/installer/media"
 )
 
-var AutoStartEnabled bool
-
 func main() {
-	ensureFileLogging()
+	logging.Init()
 
 	mutex, err := windows.CreateMutex(nil, false, windows.StringToUTF16Ptr("WTInstallerServer"))
 	if err != nil || windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
@@ -20,57 +31,60 @@ func main() {
 	}
 	defer windows.CloseHandle(mutex)
 
+	gamedirs.Refresh()
 	systray.Run(onReady, onExit)
 }
 
 func onReady() {
-	systray.SetIcon(iconBytes)
-	systray.SetTooltip(appName)
+	systray.SetIcon(media.Icon)
+	systray.SetTooltip(app.Name)
 
-	AutoStartEnabled = getAutoStartEnabled()
+	autoStartEnabled := winutil.AutoStartEnabled()
 
 	autoStartItem := systray.AddMenuItemCheckbox(
 		"Auto-start",
 		"Toggle auto-start on Windows login",
-		AutoStartEnabled,
+		autoStartEnabled,
 	)
 	updateItem := systray.AddMenuItem("Checking for updates...", "")
 	updateItem.Disable()
 	systray.AddSeparator()
-	quitItem := systray.AddMenuItem("Quit", "Quit "+appName)
+	quitItem := systray.AddMenuItem("Quit", "Quit "+app.Name)
 
-	go startServer()
+	go server.Start()
 
 	go func() {
-		hasUpdate, tag, dlURL, err := CheckForUpdate()
+		hasUpdate, tag, dlURL, err := update.Check()
 		if err != nil {
 			log.Printf("Update check failed: %v", err)
 			updateItem.SetTitle("Update check failed")
 			return
 		}
 		if !hasUpdate {
-			updateItem.SetTitle(fmt.Sprintf("Up to date (v%s)", Version))
+			updateItem.SetTitle(fmt.Sprintf("Up to date (v%s)", app.Version))
 			return
 		}
 
 		log.Printf("Update %s found, applying automatically", tag)
 		updateItem.SetTitle(fmt.Sprintf("Updating to %s…", tag))
-		if err := ApplyUpdate(dlURL); err != nil {
+		if err := update.Apply(dlURL); err != nil {
 			log.Printf("Update failed: %v", err)
 			updateItem.SetTitle("Update failed")
+			return
 		}
+		systray.Quit()
 	}()
 
 	go func() {
 		for {
 			select {
 			case <-autoStartItem.ClickedCh:
-				AutoStartEnabled = !AutoStartEnabled
-				if err := setAutoStart(AutoStartEnabled); err != nil {
+				autoStartEnabled = !autoStartEnabled
+				if err := winutil.SetAutoStart(autoStartEnabled); err != nil {
 					log.Printf("Error toggling auto-start: %v\n", err)
-					AutoStartEnabled = !AutoStartEnabled
+					autoStartEnabled = !autoStartEnabled
 				}
-				if AutoStartEnabled {
+				if autoStartEnabled {
 					autoStartItem.Check()
 				} else {
 					autoStartItem.Uncheck()

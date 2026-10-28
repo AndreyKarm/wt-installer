@@ -1,4 +1,6 @@
-package main
+// Package gamedirs locates War Thunder installs (Gaijin Launcher and Steam)
+// and the per-account sight folders.
+package gamedirs
 
 import (
 	"fmt"
@@ -11,85 +13,75 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-type RegistryPath struct {
-	Key     registry.Key
-	SubKey  string
-	ValName string
+type registryPath struct {
+	key     registry.Key
+	subKey  string
+	valName string
 }
 
-// Guarded by dirsMu: RefreshGameDirs can run from HTTP handlers while other
-// requests read them. Use getCamoDirs() instead of reading CamoDirs directly.
+// camoDirs is guarded by mu: Refresh can run from HTTP handlers while
+// other requests read it.
 var (
-	dirsMu    sync.RWMutex
-	GameDirs  []string
-	CamoDirs  []string
-	SightDirs []string
+	mu       sync.RWMutex
+	camoDirs []string
 )
 
-// getCamoDirs returns a copy of the detected UserSkins directories.
-func getCamoDirs() []string {
-	dirsMu.RLock()
-	defer dirsMu.RUnlock()
-	return append([]string(nil), CamoDirs...)
+var launcherRegistryPath = registryPath{
+	key:     registry.CURRENT_USER,
+	subKey:  `SOFTWARE\Gaijin\WarThunder`,
+	valName: "InstallDir",
 }
 
-var launcherRegistryPath = RegistryPath{
-	Key:     registry.CURRENT_USER,
-	SubKey:  `SOFTWARE\Gaijin\WarThunder`,
-	ValName: "InstallDir",
-}
-
-var steamRegistryPath = RegistryPath{
-	Key:     registry.CURRENT_USER,
-	SubKey:  `SOFTWARE\Valve\Steam`,
-	ValName: "SteamPath",
+var steamRegistryPath = registryPath{
+	key:     registry.CURRENT_USER,
+	subKey:  `SOFTWARE\Valve\Steam`,
+	valName: "SteamPath",
 }
 
 const warThunderSteamAppID = "236390"
 
-func init() {
-	ensureFileLogging()
-	RefreshGameDirs()
+// CamoDirs returns a copy of the UserSkins directories found by the last
+// Refresh.
+func CamoDirs() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return append([]string(nil), camoDirs...)
 }
 
-func OpenRegistryValue(p RegistryPath) (string, error) {
-	key, err := registry.OpenKey(p.Key, p.SubKey, registry.QUERY_VALUE)
+func openRegistryValue(p registryPath) (string, error) {
+	key, err := registry.OpenKey(p.key, p.subKey, registry.QUERY_VALUE)
 	if err != nil {
 		return "", err
 	}
 	defer key.Close()
-	val, _, err := key.GetStringValue(p.ValName)
+	val, _, err := key.GetStringValue(p.valName)
 	return val, err
 }
 
-// RefreshGameDirs re-scans for War Thunder installs. Safe to call at any
-// time (e.g. lazily before a download) so the tray app and its HTTP
-// server keep running even if the game wasn't found yet, instead of
-// killing the whole background service.
-func RefreshGameDirs() {
-	dirs, err := FindAllGameDirs()
-	sd, sightErr := GetSightDirs()
+// Refresh re-scans for War Thunder installs. Safe to call at any time
+// (e.g. lazily before a download) so the tray app and its HTTP server keep
+// running even if the game wasn't found yet, instead of killing the whole
+// background service.
+func Refresh() {
+	dirs, err := FindAll()
+	_, sightErr := SightDirs()
 
-	dirsMu.Lock()
-	defer dirsMu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
 	if err != nil {
 		log.Printf("Warning: no War Thunder installation found yet: %v", err)
-		GameDirs = nil
-		CamoDirs = nil
+		camoDirs = nil
 	} else {
-		GameDirs = dirs
-		CamoDirs = make([]string, len(dirs))
+		camoDirs = make([]string, len(dirs))
 		for i, d := range dirs {
-			CamoDirs[i] = filepath.Join(d, "UserSkins")
+			camoDirs[i] = filepath.Join(d, "UserSkins")
 		}
 		log.Printf("Found War Thunder install(s): %s", strings.Join(dirs, ", "))
 	}
 
 	if sightErr != nil {
 		log.Printf("Warning: could not find sight folders: %v", sightErr)
-	} else {
-		SightDirs = sd
 	}
 }
 
@@ -165,21 +157,21 @@ func FindSteamGamePath(steamPath string) (string, error) {
 	return "", fmt.Errorf("War Thunder not found in any Steam library")
 }
 
-// FindAllGameDirs checks for both the Gaijin Launcher and Steam
-// installations and returns every one that is actually present, instead
-// of stopping at the first match.
-func FindAllGameDirs() ([]string, error) {
+// FindAll checks for both the Gaijin Launcher and Steam installations and
+// returns every one that is actually present, instead of stopping at the
+// first match.
+func FindAll() ([]string, error) {
 	var dirs []string
 	seen := make(map[string]bool)
 
-	if gamePath, err := OpenRegistryValue(launcherRegistryPath); err == nil {
+	if gamePath, err := openRegistryValue(launcherRegistryPath); err == nil {
 		if !seen[gamePath] {
 			seen[gamePath] = true
 			dirs = append(dirs, gamePath)
 		}
 	}
 
-	if steamPath, err := OpenRegistryValue(steamRegistryPath); err == nil {
+	if steamPath, err := openRegistryValue(steamRegistryPath); err == nil {
 		if steamGamePath, err := FindSteamGamePath(steamPath); err == nil {
 			if !seen[steamGamePath] {
 				seen[steamGamePath] = true
@@ -196,16 +188,18 @@ func FindAllGameDirs() ([]string, error) {
 	return dirs, nil
 }
 
-// Sights
-func GetSavesDirBase() string {
+// SavesDirBase returns Documents\My Games\WarThunder\Saves.
+func SavesDirBase() string {
 	homeDir, _ := os.UserHomeDir()
 	return filepath.Join(
 		homeDir, "Documents", "My Games", "WarThunder", "Saves",
 	)
 }
 
-func GetSightDirs() ([]string, error) {
-	savesPath := GetSavesDirBase()
+// SightDirs returns UserSights\all_tanks for every numeric (account id)
+// folder under Saves. The folders may not exist yet.
+func SightDirs() ([]string, error) {
+	savesPath := SavesDirBase()
 	entries, err := os.ReadDir(savesPath)
 	if err != nil {
 		log.Printf("could not read Saves directory: %v\n", err)

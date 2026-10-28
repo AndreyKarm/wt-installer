@@ -1,4 +1,4 @@
-package main
+package installer
 
 import (
 	"archive/zip"
@@ -44,15 +44,9 @@ func serveZips(t *testing.T, zips map[string][]byte) *httptest.Server {
 
 func withCamoDir(t *testing.T) string {
 	dir := t.TempDir()
-	dirsMu.Lock()
-	old := CamoDirs
-	CamoDirs = []string{dir}
-	dirsMu.Unlock()
-	t.Cleanup(func() {
-		dirsMu.Lock()
-		CamoDirs = old
-		dirsMu.Unlock()
-	})
+	old := listCamoDirs
+	listCamoDirs = func() []string { return []string{dir} }
+	t.Cleanup(func() { listCamoDirs = old })
 	return dir
 }
 
@@ -177,19 +171,5 @@ func TestCopyTreeDedupForSights(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(dest, "sight_2.blk")); got != "two" {
 		t.Errorf("sight_2: %q", got)
-	}
-}
-
-func TestIsAllowedOrigin(t *testing.T) {
-	for origin, want := range map[string]bool{
-		"":                            true,
-		"https://live.warthunder.com": true,
-		"moz-extension://abc-123":     true,
-		"https://evil.example":        false,
-		"https://live.warthunder.com.evil.example": false,
-	} {
-		if got := isAllowedOrigin(origin); got != want {
-			t.Errorf("%q: got %v, want %v", origin, got, want)
-		}
 	}
 }

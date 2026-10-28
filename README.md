@@ -28,5 +28,5 @@ Tool to download skins from WarThunder Live's official website into the game's s
 
 1. Install [Go](https://go.dev/doc/install).
 2. Clone the repository.
-3. Run `go build -o wt-installer.exe .` or run build.bat.
+3. Run `go build -o wt-installer.exe ./cmd/wt-installer` or run build.bat.
 4. Run the executable file.

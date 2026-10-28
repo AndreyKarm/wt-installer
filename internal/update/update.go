@@ -1,4 +1,5 @@
-package main
+// Package update implements self-update from GitHub Releases.
+package update
 
 import (
 	"encoding/json"
@@ -11,14 +12,18 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
-	"fyne.io/systray"
+	"liotom/installer/internal/app"
+	"liotom/installer/internal/winutil"
 )
 
 const (
 	githubOwner = "AndreyKarm"
 	githubRepo  = "wt-installer"
 )
+
+var httpClient = &http.Client{Timeout: 5 * time.Minute}
 
 type githubRelease struct {
 	TagName string        `json:"tag_name"`
@@ -39,9 +44,9 @@ func getLatestRelease() (*githubRelease, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", appName+"/"+Version)
+	req.Header.Set("User-Agent", app.Name+"/"+app.Version)
 
-	resp, err := downloadClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -85,14 +90,14 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-// CheckForUpdate queries GitHub for the latest release.
+// Check queries GitHub for the latest release.
 // Returns (hasUpdate, tagName, downloadURL, error).
-func CheckForUpdate() (bool, string, string, error) {
+func Check() (bool, string, string, error) {
 	release, err := getLatestRelease()
 	if err != nil {
 		return false, "", "", err
 	}
-	if compareVersions(release.TagName, Version) <= 0 {
+	if compareVersions(release.TagName, app.Version) <= 0 {
 		return false, "", "", nil
 	}
 	for _, asset := range release.Assets {
@@ -105,16 +110,17 @@ func CheckForUpdate() (bool, string, string, error) {
 	)
 }
 
-// ApplyUpdate downloads the new exe, then uses a hidden batch script to swap
-// it in and restart after the current process exits.
-func ApplyUpdate(downloadURL string) error {
-	exePath := getExecutablePath()
+// Apply downloads the new exe and starts a hidden batch script that swaps
+// it in and restarts once the current process exits. On success the
+// caller must quit the app.
+func Apply(downloadURL string) error {
+	exePath := winutil.ExecutablePath()
 	dir := filepath.Dir(exePath)
 	newExePath := filepath.Join(dir, "_update_new.exe")
 	batPath := filepath.Join(dir, "_update.bat")
 
 	log.Printf("Downloading update from %s", downloadURL)
-	resp, err := downloadClient.Get(downloadURL)
+	resp, err := httpClient.Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
@@ -154,6 +160,5 @@ func ApplyUpdate(downloadURL string) error {
 	}
 
 	log.Printf("Update pending - restarting")
-	systray.Quit()
 	return nil
 }
