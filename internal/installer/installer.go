@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"liotom/installer/internal/gamedirs"
+	"liotom/installer/internal/installed"
 	"liotom/installer/internal/logging"
 )
 
@@ -32,7 +33,16 @@ var (
 	listCamoDirs    = gamedirs.CamoDirs
 	refreshGameDirs = gamedirs.Refresh
 	listSightDirs   = gamedirs.SightDirs
+	recordInstall   = installed.Add
 )
+
+// remember records a finished install for the "already installed" marks.
+// Failing to record only loses the mark, so it doesn't fail the install.
+func remember(postId int, kind string, paths []string) {
+	if err := recordInstall(postId, kind, paths); err != nil {
+		log.Printf("Could not record install of post %d: %v", postId, err)
+	}
+}
 
 var downloadClient = &http.Client{Timeout: 5 * time.Minute}
 
@@ -69,27 +79,30 @@ func DownloadSkin(postId int, fileUrl string) (string, error) {
 		name = fmt.Sprintf("wtskin-%d", postId)
 	}
 
-	var notes []string
+	var notes, folders []string
 	for _, dir := range camoDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("mkdir %s: %v\n", dir, err)
 			logging.OpenFolder()
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
-		note, err := installSkinFolder(srcDir, dir, name)
+		note, folder, err := installSkinFolder(srcDir, dir, name)
 		if err != nil {
 			log.Printf("Install error for %d in %s: %v\n", postId, dir, err)
 			logging.OpenFolder()
 			return "", fmt.Errorf("install error for %d in %s: %w", postId, dir, err)
 		}
 		notes = append(notes, note)
+		folders = append(folders, folder)
 	}
+	remember(postId, "camo", folders)
 	return joinUnique(notes), nil
 }
 
 // installSkinFolder copies srcDir into destBase/name, or into the first
-// name_N that is either free or already holds this exact skin.
-func installSkinFolder(srcDir, destBase, name string) (string, error) {
+// name_N that is either free or already holds this exact skin. It returns
+// a summary and the folder that now holds the skin.
+func installSkinFolder(srcDir, destBase, name string) (note, folder string, err error) {
 	for i := 1; ; i++ {
 		candidate := name
 		if i > 1 {
@@ -100,16 +113,16 @@ func installSkinFolder(srcDir, destBase, name string) (string, error) {
 		info, err := os.Stat(target)
 		if os.IsNotExist(err) {
 			if _, err := copyTree(srcDir, target, false); err != nil {
-				return "", err
+				return "", "", err
 			}
 			log.Printf("Installed skin into %s", target)
 			if i > 1 {
-				return fmt.Sprintf("Installed as %s (a different skin named %s already exists)", candidate, name), nil
+				return fmt.Sprintf("Installed as %s (a different skin named %s already exists)", candidate, name), target, nil
 			}
-			return fmt.Sprintf("Installed as %s", candidate), nil
+			return fmt.Sprintf("Installed as %s", candidate), target, nil
 		}
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if !info.IsDir() {
 			continue
@@ -117,11 +130,11 @@ func installSkinFolder(srcDir, destBase, name string) (string, error) {
 
 		same, err := treeContains(target, srcDir)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if same {
 			log.Printf("Skin already installed at %s, skipping", target)
-			return fmt.Sprintf("Already installed as %s", candidate), nil
+			return fmt.Sprintf("Already installed as %s", candidate), target, nil
 		}
 		log.Printf("Folder %s holds a different skin, trying next name", target)
 	}
@@ -166,7 +179,9 @@ func DownloadSight(postId int, fileUrl string) (string, error) {
 		total.written += stats.written
 		total.skipped += stats.skipped
 		total.renamed += stats.renamed
+		total.paths = append(total.paths, stats.paths...)
 	}
+	remember(postId, "sight", total.paths)
 
 	msg := fmt.Sprintf("Installed %d file(s)", total.written)
 	if total.renamed > 0 {
@@ -386,6 +401,9 @@ func isJunkEntry(slashPath string) bool {
 
 type copyStats struct {
 	written, skipped, renamed int
+	// paths lists every destination file now holding incoming content,
+	// including identical files that were skipped.
+	paths []string
 }
 
 // copyTree copies everything under srcDir into destDir, applying the same
@@ -434,8 +452,9 @@ func copyTree(srcDir, destDir string, dedupIdentical bool) (copyStats, error) {
 				return derr
 			}
 			if skip {
-				log.Printf("Skipping identical file: %s", target)
+				log.Printf("Skipping identical file: %s", finalPath)
 				stats.skipped++
+				stats.paths = append(stats.paths, finalPath)
 				return nil
 			}
 			if finalPath != target {
@@ -449,6 +468,7 @@ func copyTree(srcDir, destDir string, dedupIdentical bool) (copyStats, error) {
 			return err
 		}
 		stats.written++
+		stats.paths = append(stats.paths, writeTarget)
 		return nil
 	})
 	return stats, err
@@ -495,8 +515,9 @@ func treeContains(dir, srcDir string) (bool, error) {
 
 // dedupeTargetPath decides where newData should actually be written given a
 // desired target path. If target doesn't exist, it's used as-is. If it
-// exists with identical content, skip=true is returned (caller should do
-// nothing). If it exists with different content, target_2, target_3, ...
+// exists with identical content, skip=true is returned along with the
+// matching path (caller should write nothing). If it exists with different
+// content, target_2, target_3, ...
 // are tried until either a free name or a byte-identical match is found.
 func dedupeTargetPath(target string, newData []byte) (finalPath string, skip bool, err error) {
 	ext := filepath.Ext(target)
@@ -517,7 +538,7 @@ func dedupeTargetPath(target string, newData []byte) (finalPath string, skip boo
 		}
 
 		if bytes.Equal(existing, newData) {
-			return "", true, nil
+			return candidate, true, nil
 		}
 		// content differs, try the next suffix
 	}

@@ -49,6 +49,13 @@ browser.runtime.onMessage.addListener((message) => {
       .catch((err) => ({ ok: false, error: err.message }));
   }
 
+  if (message.action === "wt_installed") {
+    return fetch("http://localhost:4316/installed")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((installed) => ({ ok: true, installed }))
+      .catch((err) => ({ ok: false, error: err.message }));
+  }
+
   if (message.action === "wt_server_version") {
     return fetch("http://localhost:4316/version")
       .then((r) => r.text())

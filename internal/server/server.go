@@ -12,6 +12,7 @@ import (
 
 	"liotom/installer/internal/app"
 	"liotom/installer/internal/gamedirs"
+	"liotom/installer/internal/installed"
 	"liotom/installer/internal/installer"
 	"liotom/installer/internal/logging"
 	"liotom/installer/internal/winutil"
@@ -167,6 +168,19 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, summary)
 }
 
+// installedHandler returns {"<postId>": "camo"|"sight"} for posts whose
+// installed files are still on disk.
+func installedHandler(w http.ResponseWriter, r *http.Request) {
+	status, err := installed.Status()
+	if err != nil {
+		log.Printf("Installed list error: %v\n", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
 // Start serves the API on 127.0.0.1:app.Port. It blocks, so run it in a
 // goroutine.
 func Start() {
@@ -176,6 +190,7 @@ func Start() {
 	mux.HandleFunc("/version", versionHandler)
 	mux.HandleFunc("/openfolder", openFolderHandler)
 	mux.HandleFunc("/download", downloadHandler)
+	mux.HandleFunc("/installed", installedHandler)
 	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(logging.Entries())
 	})

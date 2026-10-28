@@ -50,6 +50,36 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// Installed state: post id (string) -> "camo" | "sight", from the server
+let installedPosts = {};
+
+// Shows the idle label: "Installed" for posts already on disk, otherwise
+// the install title. Clicking an installed post still reinstalls it.
+function renderIdle(btn) {
+  if (btn.dataset.pending) return;
+  const label = btn.querySelector(".num");
+  const isInstalled = Boolean(installedPosts[btn.dataset.postId]);
+  btn.classList.toggle("wt-local-installed", isInstalled);
+  btn.style.color = "";
+  if (isInstalled) {
+    label.textContent = "✓ Installed";
+    btn.title = "Already installed. Click to install again";
+  } else {
+    label.textContent = btn.dataset.defaultTitle;
+    btn.title = btn.dataset.defaultTitle;
+  }
+}
+
+async function refreshInstalled() {
+  const result = await browser.runtime
+    .sendMessage({ action: "wt_installed" })
+    .catch(() => null);
+  // Server offline: keep the last known state rather than clearing marks
+  if (!result?.ok) return;
+  installedPosts = result.installed ?? {};
+  document.querySelectorAll(`.${BTN_MARKER}`).forEach(renderIdle);
+}
+
 // Shared button factory
 function createDownloadButton(downloadType, postId, fileUrl) {
   const type = TYPE_MAP[downloadType];
@@ -57,13 +87,14 @@ function createDownloadButton(downloadType, postId, fileUrl) {
 
   const btn = document.createElement("a");
   btn.className = `button downloads button_item ${BTN_MARKER}`;
-  btn.title = defaultTitle;
   btn.href = "#";
+  btn.dataset.postId = String(postId);
+  btn.dataset.defaultTitle = defaultTitle;
 
   const label = document.createElement("span");
   label.className = "num";
-  label.textContent = defaultTitle;
   btn.appendChild(label);
+  renderIdle(btn);
 
   btn.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -87,6 +118,7 @@ function createDownloadButton(downloadType, postId, fileUrl) {
     label.textContent = "";
 
     if (result?.ok) {
+      installedPosts[String(postId)] = type;
       label.textContent = "Installed";
       btn.style.color = "#4caf50";
       const detail = result.message ? `: ${result.message}` : "";
@@ -107,10 +139,7 @@ function createDownloadButton(downloadType, postId, fileUrl) {
       );
     }
 
-    setTimeout(() => {
-      label.textContent = defaultTitle;
-      btn.style.color = "";
-    }, 2000);
+    setTimeout(() => renderIdle(btn), 2000);
   });
 
   return btn;
@@ -178,6 +207,12 @@ function processPopup() {
 
 processPosts();
 processPopup();
+refreshInstalled();
+
+// Pick up installs from other tabs and skins deleted by hand
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshInstalled();
+});
 
 const feedObserver = new MutationObserver(processPosts);
 feedObserver.observe(document.querySelector("#feedwrapper") ?? document.body, {

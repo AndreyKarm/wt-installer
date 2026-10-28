@@ -28,6 +28,12 @@
   vertical-align: middle;
 }
 
+/* !important: the site's own .button.downloads rules are more specific */
+.local-dl-btn.wt-local-installed,
+.local-dl-btn.wt-local-installed .num {
+  color: var(--wt-success-color) !important;
+}
+
 #wt-local-toast-container {
   position: fixed;
   top: 1.5rem;

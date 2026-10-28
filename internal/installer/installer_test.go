@@ -11,6 +11,67 @@ import (
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	// Never write to the real %APPDATA% store from tests.
+	recordInstall = func(int, string, []string) error { return nil }
+	os.Exit(m.Run())
+}
+
+type recorded struct {
+	postId int
+	kind   string
+	paths  []string
+}
+
+func captureRecords(t *testing.T) *[]recorded {
+	var got []recorded
+	old := recordInstall
+	recordInstall = func(postId int, kind string, paths []string) error {
+		got = append(got, recorded{postId, kind, paths})
+		return nil
+	}
+	t.Cleanup(func() { recordInstall = old })
+	return &got
+}
+
+func TestInstallsAreRecorded(t *testing.T) {
+	camo := withCamoDir(t)
+	sights := t.TempDir()
+	oldSights := listSightDirs
+	listSightDirs = func() ([]string, error) { return []string{sights}, nil }
+	t.Cleanup(func() { listSightDirs = oldSights })
+	records := captureRecords(t)
+
+	srv := serveZips(t, map[string][]byte{
+		"skin":  makeZip(t, map[string]string{"tiger/body_c.dds": "A"}),
+		"skin2": makeZip(t, map[string]string{"tiger/body_c.dds": "B"}),
+		"sight": makeZip(t, map[string]string{"pack/a.blk": "1", "pack/b.blk": "2"}),
+	})
+
+	DownloadSkin(1, srv.URL+"/skin")
+	DownloadSkin(1, srv.URL+"/skin") // already installed: still recorded
+	DownloadSkin(2, srv.URL+"/skin2")
+	DownloadSight(3, srv.URL+"/sight")
+	DownloadSight(3, srv.URL+"/sight") // identical files skipped: still recorded
+
+	want := []recorded{
+		{1, "camo", []string{filepath.Join(camo, "tiger")}},
+		{1, "camo", []string{filepath.Join(camo, "tiger")}},
+		{2, "camo", []string{filepath.Join(camo, "tiger_2")}},
+		{3, "sight", []string{filepath.Join(sights, "a.blk"), filepath.Join(sights, "b.blk")}},
+		{3, "sight", []string{filepath.Join(sights, "a.blk"), filepath.Join(sights, "b.blk")}},
+	}
+	if len(*records) != len(want) {
+		t.Fatalf("got %d records, want %d: %+v", len(*records), len(want), *records)
+	}
+	for i, w := range want {
+		g := (*records)[i]
+		if g.postId != w.postId || g.kind != w.kind || strings.Join(g.paths, "|") != strings.Join(w.paths, "|") {
+			t.Errorf("record %d: got %+v, want %+v", i, g, w)
+		}
+	}
+}
+
 func makeZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
