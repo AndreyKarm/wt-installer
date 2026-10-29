@@ -53,8 +53,46 @@ document.addEventListener("keydown", (e) => {
 // Installed state: post id (string) -> "camo" | "sight", from the server
 let installedPosts = {};
 
-// Install button -> its "✕" uninstall button
+// Install button -> its trash-can uninstall button
 const removeButtons = new WeakMap();
+
+// Inline SVG icons, built with DOM calls rather than innerHTML (AMO review
+// flags innerHTML in content scripts). They use currentColor, so they follow
+// the button's text color.
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ICONS = {
+  check: {
+    viewBox: "0 0 16 16",
+    attrs: { fill: "currentColor" },
+    d: "M13.293 3.293a1 1 0 1 1 1.414 1.414l-8 8a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L6 10.586z",
+  },
+  trash: {
+    viewBox: "0 0 24 24",
+    attrs: {
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "stroke-width": "2",
+    },
+    d: "M4 6h16l-1.58 14.22A2 2 0 0 1 16.432 22H7.568a2 2 0 0 1-1.988-1.78zm3.345-2.853A2 2 0 0 1 9.154 2h5.692a2 2 0 0 1 1.81 1.147L18 6H6zM2 6h20m-12 5v5m4-5v5",
+  },
+};
+
+function createIcon(name) {
+  const icon = ICONS[name];
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", icon.viewBox);
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", `wt-local-icon wt-local-icon-${name}`);
+  const path = document.createElementNS(SVG_NS, "path");
+  for (const [key, value] of Object.entries(icon.attrs)) {
+    path.setAttribute(key, value);
+  }
+  path.setAttribute("d", icon.d);
+  svg.appendChild(path);
+  return svg;
+}
 
 function showSpinner(label) {
   label.textContent = "";
@@ -65,7 +103,7 @@ function showSpinner(label) {
 
 // Shows the idle label: "Installed" for posts already on disk, otherwise
 // the install title. Clicking an installed post still reinstalls it; the
-// "✕" next to it uninstalls.
+// trash can next to it uninstalls.
 function renderIdle(btn) {
   if (btn.dataset.pending) return;
   const label = btn.querySelector(".num");
@@ -73,9 +111,9 @@ function renderIdle(btn) {
   btn.classList.toggle("wt-local-installed", isInstalled);
   btn.style.color = "";
   const removeBtn = removeButtons.get(btn);
-  if (removeBtn) removeBtn.style.display = isInstalled ? "" : "none";
+  if (removeBtn) removeBtn.hidden = !isInstalled;
   if (isInstalled) {
-    label.textContent = "✓ Installed";
+    label.replaceChildren(createIcon("check"), "Installed");
     btn.title = "Already installed. Click to install again";
   } else {
     label.textContent = btn.dataset.defaultTitle;
@@ -106,14 +144,15 @@ function createDownloadButtons(downloadType, postId, fileUrl) {
   btn.dataset.defaultTitle = defaultTitle;
 
   const label = document.createElement("span");
-  label.className = "num";
+  label.className = "num wt-local-label";
   btn.appendChild(label);
 
   const removeBtn = document.createElement("a");
   removeBtn.className = "button button_item wt-local-uninstall";
   removeBtn.href = "#";
   removeBtn.title = "Uninstall: delete its files from the game folders";
-  removeBtn.textContent = "✕";
+  removeBtn.setAttribute("aria-label", "Uninstall");
+  removeBtn.appendChild(createIcon("trash"));
   removeButtons.set(btn, removeBtn);
   renderIdle(btn);
 
@@ -129,7 +168,7 @@ function createDownloadButtons(downloadType, postId, fileUrl) {
     }
 
     btn.dataset.pending = "true";
-    removeBtn.style.display = "none";
+    removeBtn.hidden = true;
     showSpinner(label);
 
     const result = await browser.runtime.sendMessage({
@@ -158,7 +197,7 @@ function createDownloadButtons(downloadType, postId, fileUrl) {
     if (btn.dataset.pending) return;
 
     btn.dataset.pending = "true";
-    removeBtn.style.display = "none";
+    removeBtn.hidden = true;
     showSpinner(label);
 
     const result = await browser.runtime.sendMessage({

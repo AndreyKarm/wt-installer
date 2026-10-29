@@ -34,9 +34,52 @@
   color: var(--wt-success-color) !important;
 }
 
+/* Icons follow the text color (currentColor). The site's button rules hang
+   off #feedWrapper / #clb ids, so layout overrides need !important. */
+.wt-local-icon {
+  display: block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+/* Label: icon and text centered on one line. 12px matches the line box the
+   feed gives .num, so the row height doesn't change. */
+.local-dl-btn .wt-local-label {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Feed, installed: the check replaces the site's download icon, which it
+   draws with :before inside a 26px left padding. */
+.feed_item .local-dl-btn.wt-local-installed {
+  padding-left: 8px !important;
+}
+.feed_item .local-dl-btn.wt-local-installed:before {
+  display: none !important;
+}
+
+/* Uninstall: trash can centered both ways. */
 .wt-local-uninstall {
-  padding-left: 0.6em !important;
-  padding-right: 0.6em !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+/* Shown only for installed posts. Needs !important to beat the
+   display: flex above. */
+.wt-local-uninstall[hidden] {
+  display: none !important;
+}
+.wt-local-uninstall .wt-local-icon {
+  width: 16px;
+  height: 16px;
+}
+/* Feed row: drop the 26px left padding reserved for the site's own icon,
+   which is what pushed the old ✕ off-center. */
+.feed_item .wt-local-uninstall {
+  padding: 0 6px !important;
   color: var(--wt-text-color-muted) !important;
 }
 .wt-local-uninstall:hover {
