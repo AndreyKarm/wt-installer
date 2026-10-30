@@ -1,4 +1,24 @@
+// localhost matches the manifest's host_permissions. Switching to 127.0.0.1
+// would be a new permission, and Firefox may ask users to approve it before
+// the update installs.
 const BASE = "http://localhost:4316";
+
+// Oldest tray app with everything this extension uses (/installed,
+// /uninstall). Older servers still install, but marks and uninstall fail.
+const MIN_SERVER_VERSION = "0.1.8";
+
+// compareVersions returns 1 if a > b, -1 if a < b, 0 if equal. Same rules
+// as the tray app's updater: numeric parts, missing parts count as 0.
+function compareVersions(a, b) {
+  const pa = a.replace(/^v/, "").split(".");
+  const pb = b.replace(/^v/, "").split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = parseInt(pa[i], 10) || 0;
+    const y = parseInt(pb[i], 10) || 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
 
 // Version info
 document.getElementById("ext-version").textContent =
@@ -7,9 +27,19 @@ document.getElementById("ext-version").textContent =
 fetch(`${BASE}/version`)
   .then((r) => r.text())
   .then((text) => {
+    const version = text.replace("Version: ", "").trim();
     const el = document.getElementById("srv-version");
-    el.textContent = `v${text.replace("Version: ", "")}`;
+    el.textContent = `v${version}`;
     el.style.color = "#4caf50";
+
+    if (compareVersions(version, MIN_SERVER_VERSION) < 0) {
+      el.style.color = "#ffa726";
+      const warning = document.getElementById("srv-warning");
+      warning.textContent =
+        `The tray app is outdated. "Installed" marks and uninstall need ` +
+        `v${MIN_SERVER_VERSION} or newer. Restart it to update.`;
+      warning.hidden = false;
+    }
   })
   .catch(() => {
     const el = document.getElementById("srv-version");
@@ -114,21 +144,31 @@ async function fetchLogs() {
   }
 }
 
+// Log rows are built with DOM calls and textContent, never innerHTML: the
+// text comes from the server and the page, and AMO review flags innerHTML.
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+
+// Only known values become class names, so log data can't inject classes.
+const LOG_LEVELS = ["info", "warn", "error"];
+const LOG_SOURCES = ["content", "bg"];
+
 function renderServerLogs(logs) {
   if (!logs.length) {
     renderEmpty("No server logs yet.");
     return;
   }
-  logEntries.innerHTML = [...logs]
-    .reverse()
-    .map(
-      ({ time, message }) =>
-        `<div class="log-entry">` +
-        `<span class="log-time">${esc(time)}</span>` +
-        `<span class="log-msg">${esc(message)}</span>` +
-        `</div>`
-    )
-    .join("");
+  logEntries.replaceChildren(
+    ...[...logs].reverse().map(({ time, message }) => {
+      const row = el("div", "log-entry");
+      row.append(el("span", "log-time", time), el("span", "log-msg", message));
+      return row;
+    })
+  );
 }
 
 function renderExtLogs(logs) {
@@ -136,26 +176,21 @@ function renderExtLogs(logs) {
     renderEmpty("No extension logs yet.");
     return;
   }
-  logEntries.innerHTML = [...logs]
-    .reverse()
-    .map(
-      ({ time, level, source, message }) =>
-        `<div class="log-entry log-${esc(level)}">` +
-        `<span class="log-time">${esc(time)}</span>` +
-        `<span class="log-src log-src-${esc(source)}">${esc(source)}</span>` +
-        `<span class="log-msg">${esc(message)}</span>` +
-        `</div>`
-    )
-    .join("");
+  logEntries.replaceChildren(
+    ...[...logs].reverse().map(({ time, level, source, message }) => {
+      const lvl = LOG_LEVELS.includes(level) ? level : "info";
+      const src = LOG_SOURCES.includes(source) ? source : "content";
+      const row = el("div", `log-entry log-${lvl}`);
+      row.append(
+        el("span", "log-time", time),
+        el("span", `log-src log-src-${src}`, source),
+        el("span", "log-msg", message)
+      );
+      return row;
+    })
+  );
 }
 
 function renderEmpty(msg) {
-  logEntries.innerHTML = `<span class="log-empty">${esc(msg)}</span>`;
-}
-
-function esc(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  logEntries.replaceChildren(el("span", "log-empty", msg));
 }

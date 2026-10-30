@@ -28,10 +28,12 @@
   vertical-align: middle;
 }
 
-/* !important: the site's own .button.downloads rules are more specific */
+/* !important: the site's own .button.downloads rules are more specific.
+   A darker green than --wt-success-color: the feed is white, where
+   #4caf50 text only reaches 2.8:1 contrast; #2e7d32 is above 5:1. */
 .local-dl-btn.wt-local-installed,
 .local-dl-btn.wt-local-installed .num {
-  color: var(--wt-success-color) !important;
+  color: #2e7d32 !important;
 }
 
 /* Icons follow the text color (currentColor). The site's button rules hang
@@ -50,6 +52,17 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
+}
+
+/* Full-post view: the button is the site's slate blue, where green text is
+   hard to read. Keep the site's white text and color only the check, in a
+   lighter green that stands out on blue. */
+.description .local-dl-btn.wt-local-installed,
+.description .local-dl-btn.wt-local-installed .num {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+.description .local-dl-btn.wt-local-installed .wt-local-icon-check {
+  color: #c8e6c9;
 }
 
 /* Feed, installed: the check replaces the site's download icon, which it

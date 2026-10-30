@@ -110,10 +110,10 @@ func Check() (bool, string, string, error) {
 	)
 }
 
-// Apply downloads the new exe and starts a hidden batch script that swaps
-// it in and restarts once the current process exits. On success the
-// caller must quit the app.
-func Apply(downloadURL string) error {
+// Apply downloads the release tag's exe and starts a hidden batch script
+// that swaps it in and restarts once the current process exits. On success
+// the caller must quit the app.
+func Apply(tag, downloadURL string) error {
 	exePath := winutil.ExecutablePath()
 	dir := filepath.Dir(exePath)
 	newExePath := filepath.Join(dir, "_update_new.exe")
@@ -142,10 +142,7 @@ func Apply(downloadURL string) error {
 	}
 	f.Close()
 
-	bat := fmt.Sprintf(
-		"@echo off\r\ntimeout /t 2 /nobreak >nul\r\nmove /Y \"%s\" \"%s\"\r\nstart \"\" \"%s\"\r\ndel \"%%~f0\"\r\n",
-		newExePath, exePath, exePath,
-	)
+	bat := swapScript(newExePath, exePath, fmt.Sprintf(`start "" "%s"`, exePath), swapTries)
 	if err := os.WriteFile(batPath, []byte(bat), 0644); err != nil {
 		os.Remove(newExePath)
 		return fmt.Errorf("write update script: %w", err)
@@ -159,6 +156,84 @@ func Apply(downloadURL string) error {
 		return fmt.Errorf("launch update script: %w", err)
 	}
 
+	recordAttempt(tag)
 	log.Printf("Update pending - restarting")
 	return nil
+}
+
+// swapTries is how many times (about a second apart) the update script
+// tries to replace the exe.
+const swapTries = 30
+
+// swapScript returns a batch script that replaces exe with newExe and then
+// runs launch. The old exe can stay locked for a while after the process
+// quits (slow shutdown, antivirus scans), so the move is retried. If it
+// never succeeds the staged file is deleted and launch starts the old exe.
+// The caller's attempt record then stops the app from retrying right away.
+func swapScript(newExe, exe, launch string, tries int) string {
+	return strings.Join([]string{
+		"@echo off",
+		"set tries=0",
+		":retry",
+		// ping is the classic portable sleep; timeout fails without a
+		// console input.
+		"ping -n 2 127.0.0.1 >nul",
+		fmt.Sprintf(`move /Y "%s" "%s" >nul 2>&1`, newExe, exe),
+		"if not errorlevel 1 goto launch",
+		"set /a tries+=1",
+		fmt.Sprintf("if %%tries%% lss %d goto retry", tries),
+		fmt.Sprintf(`del "%s" >nul 2>&1`, newExe),
+		":launch",
+		launch,
+		// "(goto)" ends the script before del removes it, so cmd doesn't
+		// fail trying to read the next line of a deleted file.
+		`(goto) 2>nul & del "%~f0"`,
+	}, "\r\n") + "\r\n"
+}
+
+// retryAfter is how long the app waits before trying the same update again
+// after an attempt that didn't take effect.
+const retryAfter = 6 * time.Hour
+
+type attempt struct {
+	Tag  string    `json:"tag"`
+	Time time.Time `json:"time"`
+}
+
+// attemptPath is a variable so tests can use a temp file.
+var attemptPath = defaultAttemptPath()
+
+func defaultAttemptPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "WTInstaller", "update-attempt.json")
+}
+
+func recordAttempt(tag string) {
+	data, _ := json.Marshal(attempt{Tag: tag, Time: time.Now().UTC()})
+	err := os.MkdirAll(filepath.Dir(attemptPath), 0755)
+	if err == nil {
+		err = os.WriteFile(attemptPath, data, 0644)
+	}
+	if err != nil {
+		log.Printf("Could not record update attempt: %v", err)
+	}
+}
+
+// RecentlyAttempted reports whether updating to tag was already tried in
+// the last retryAfter. Called with a tag that is still newer than the
+// running version, it means that attempt failed (the swap never happened),
+// so applying it again would just restart into the old exe in a loop.
+func RecentlyAttempted(tag string) bool {
+	data, err := os.ReadFile(attemptPath)
+	if err != nil {
+		return false
+	}
+	var a attempt
+	if json.Unmarshal(data, &a) != nil {
+		return false
+	}
+	return a.Tag == tag && time.Since(a.Time) < retryAfter
 }

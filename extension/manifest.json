@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "WT Local Downloader",
-  "version": "1.4",
-  "description": "Adds a 'Download localy' button to War Thunder Live posts",
+  "version": "1.4.1",
+  "description": "Install War Thunder Live camouflages and sights into your game folders with one click, see which are installed, and uninstall them",
   "browser_specific_settings": {
     "gecko": {
       "id": "wt-local-downloader@extension",

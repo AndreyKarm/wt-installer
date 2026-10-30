@@ -13,10 +13,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -44,8 +44,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # Pinned so a new rsrc release can't change or break builds.
       - name: Install rsrc
-        run: go install github.com/akavel/rsrc@latest
+        run: go install github.com/akavel/rsrc@v0.10.2
 
       - name: Generate icon resource
         run: rsrc -ico media/icon.ico -o cmd/wt-installer/rsrc.syso
@@ -65,7 +66,7 @@ jobs:
         run: upx --best --lzma "WT Installer.exe"
 
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: "WT Installer.exe"
         env:

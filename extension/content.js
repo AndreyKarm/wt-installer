@@ -213,7 +213,7 @@ function createDownloadButtons(downloadType, postId, fileUrl) {
     if (result?.ok) {
       installedPosts[String(postId)] = type;
       label.textContent = "Installed";
-      btn.style.color = "#4caf50";
+      btn.style.color = "#2e7d32";
       const detail = result.message ? `: ${result.message}` : "";
       showToast(`${type} post #${postId}${detail}`, "success");
       wtLog("info", `${type} downloaded for post ${postId}${detail}`);

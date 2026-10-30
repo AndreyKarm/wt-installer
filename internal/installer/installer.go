@@ -730,6 +730,9 @@ func Uninstall(postId int) (string, error) {
 		}
 		log.Printf("Removed %s", p)
 		removed++
+		if rec.Type == "sight" {
+			removeEmptyParents(p, sightDirs)
+		}
 	}
 
 	if err := forgetInstall(postId); err != nil {
@@ -746,6 +749,21 @@ func Uninstall(postId int) (string, error) {
 		msg += fmt.Sprintf(", kept %d still in use or outside the game folders", kept)
 	}
 	return msg, nil
+}
+
+// removeEmptyParents deletes folders left empty after removing path (sight
+// archives can have subfolders), walking up until it reaches one of roots,
+// which is always kept. It stops at the first folder that isn't empty.
+func removeEmptyParents(path string, roots []string) {
+	dir := filepath.Dir(filepath.Clean(path))
+	for isChildOf(dir, roots, false) {
+		// os.Remove only deletes empty folders.
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+		log.Printf("Removed empty folder %s", dir)
+		dir = filepath.Dir(dir)
+	}
 }
 
 // isChildOf reports whether path is inside one of dirs: directly inside

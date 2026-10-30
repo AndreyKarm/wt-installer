@@ -60,6 +60,19 @@ a:hover {
   font-weight: 600;
 }
 
+.warning {
+  font-size: 0.75rem;
+  color: var(--wt-warn-color);
+  border-left: 3px solid var(--wt-warn-color);
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.5rem;
+  background: var(--wt-container-bg);
+}
+
+.warning[hidden] {
+  display: none;
+}
+
 .divider {
   border: none;
   border-top: 1px solid var(--wt-primary-color);

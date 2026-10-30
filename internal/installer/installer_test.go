@@ -253,6 +253,46 @@ func TestUninstall(t *testing.T) {
 	}
 }
 
+func TestUninstallRemovesEmptySightFolders(t *testing.T) {
+	withCamoDir(t)
+	sights := t.TempDir()
+	oldSights := listSightDirs
+	listSightDirs = func() ([]string, error) { return []string{sights}, nil }
+	t.Cleanup(func() { listSightDirs = oldSights })
+	useMemoryStore(t)
+
+	srv := serveZips(t, map[string][]byte{
+		"nested": makeZip(t, map[string]string{"pack/tanks/t34/a.blk": "1", "pack/tanks/t34/b.blk": "2"}),
+		"other":  makeZip(t, map[string]string{"pack/tanks/other.blk": "3"}),
+	})
+	if _, err := DownloadSight(1, srv.URL+"/nested"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DownloadSight(2, srv.URL+"/other"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Uninstall(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sights, "tanks", "t34")); !os.IsNotExist(err) {
+		t.Errorf("empty tanks/t34 folder left behind")
+	}
+	if _, err := os.Stat(filepath.Join(sights, "tanks", "other.blk")); err != nil {
+		t.Errorf("tanks/ removed while post 2 still uses it: %v", err)
+	}
+
+	if _, err := Uninstall(2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sights, "tanks")); !os.IsNotExist(err) {
+		t.Errorf("empty tanks folder left behind")
+	}
+	if _, err := os.Stat(sights); err != nil {
+		t.Errorf("the all_tanks folder itself was removed: %v", err)
+	}
+}
+
 func TestUninstallOnlyTouchesGameFolders(t *testing.T) {
 	camo := withCamoDir(t)
 	store := useMemoryStore(t)

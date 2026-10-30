@@ -69,9 +69,16 @@ func onReady() {
 			return
 		}
 
+		if update.RecentlyAttempted(tag) {
+			// We're still on the old version, so the last swap failed.
+			log.Printf("Update %s was already tried recently and didn't apply; not retrying yet", tag)
+			updateItem.SetTitle(fmt.Sprintf("Update to %s failed, will retry later", tag))
+			return
+		}
+
 		log.Printf("Update %s found, applying automatically", tag)
 		updateItem.SetTitle(fmt.Sprintf("Updating to %s…", tag))
-		if err := update.Apply(dlURL); err != nil {
+		if err := update.Apply(tag, dlURL); err != nil {
 			log.Printf("Update failed: %v", err)
 			updateItem.SetTitle("Update failed")
 			return
