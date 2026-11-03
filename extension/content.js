@@ -121,6 +121,16 @@ function renderIdle(btn) {
   }
 }
 
+// A post can have two buttons at once, one in the feed and one in the
+// lightbox, so state changes redraw all of them, not just the clicked one.
+function renderPost(postId, except = null) {
+  document
+    .querySelectorAll(`.${BTN_MARKER}[data-post-id="${postId}"]`)
+    .forEach((b) => {
+      if (b !== except) renderIdle(b);
+    });
+}
+
 async function refreshInstalled() {
   const result = await browser.runtime
     .sendMessage({ action: "wt_installed" })
@@ -188,7 +198,7 @@ function createDownloadButtons(downloadType, postId, fileUrl) {
       showToast(`Uninstall failed for post #${postId}: ${reason}`, "error");
       wtLog("error", `Failed to uninstall post ${postId}: ${reason}`);
     }
-    renderIdle(btn);
+    renderPost(postId);
   });
 
   btn.addEventListener("click", async (e) => {
@@ -212,6 +222,7 @@ function createDownloadButtons(downloadType, postId, fileUrl) {
 
     if (result?.ok) {
       installedPosts[String(postId)] = type;
+      renderPost(postId, btn);
       label.textContent = "Installed";
       btn.style.color = "#2e7d32";
       const detail = result.message ? `: ${result.message}` : "";
@@ -266,10 +277,19 @@ function addButton(post) {
 // Button Injection — fullview / lightbox popup
 function addPopupButton(wrapper) {
   const container = wrapper.querySelector(".description .buttons");
-  if (!container || container.querySelector(`.${BTN_MARKER}`)) return;
+  if (!container) return;
 
   const postId = parseInt(wrapper.getAttribute(POST_ATTR), 10);
   if (!postId) return;
+
+  const existing = container.querySelector(`.${BTN_MARKER}`);
+  if (existing) {
+    if (existing.dataset.postId === String(postId)) return;
+    // The lightbox reused this wrapper for another post: the old buttons
+    // would show (and install) the previous post
+    removeButtons.get(existing)?.remove();
+    existing.remove();
+  }
 
   const downloadType = getDownloadType(wrapper);
   if (!downloadType) return;
@@ -314,7 +334,12 @@ feedObserver.observe(document.querySelector("#feedwrapper") ?? document.body, {
 const popupObserver = new MutationObserver(processPopup);
 const clb = document.getElementById("clb");
 if (clb) {
-  popupObserver.observe(clb, { childList: true, subtree: true });
+  popupObserver.observe(clb, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: [POST_ATTR],
+  });
 }
 
 // Logs
