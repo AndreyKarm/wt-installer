@@ -64,13 +64,14 @@ func TestDownloadRejectsDisallowedHostsAndRedirects(t *testing.T) {
 // Bad links must be refused by the link check even on a machine without
 // War Thunder (like CI), not by whichever folder lookup fails first.
 func TestBadURLRejectedWithoutGameFolders(t *testing.T) {
-	oldCamo, oldRefresh, oldSights, oldAllow := listCamoDirs, refreshGameDirs, listSightDirs, allowDownloadURL
+	oldCamo, oldAll, oldRefresh, oldSights, oldAllow := listCamoDirs, listAllCamoDirs, refreshGameDirs, listSightDirs, allowDownloadURL
 	listCamoDirs = func() []string { return nil }
+	listAllCamoDirs = func() []string { return nil }
 	refreshGameDirs = func() {}
 	listSightDirs = func() ([]string, error) { return nil, errors.New("no Saves folder") }
 	allowDownloadURL = isWarThunderURL
 	t.Cleanup(func() {
-		listCamoDirs, refreshGameDirs, listSightDirs, allowDownloadURL = oldCamo, oldRefresh, oldSights, oldAllow
+		listCamoDirs, listAllCamoDirs, refreshGameDirs, listSightDirs, allowDownloadURL = oldCamo, oldAll, oldRefresh, oldSights, oldAllow
 	})
 
 	for _, u := range []string{"https://example.com/x.zip", "http://live.warthunder.com/dl/x/"} {
@@ -347,10 +348,51 @@ func serveZips(t *testing.T, zips map[string][]byte) *httptest.Server {
 
 func withCamoDir(t *testing.T) string {
 	dir := t.TempDir()
-	old := listCamoDirs
+	old, oldAll := listCamoDirs, listAllCamoDirs
 	listCamoDirs = func() []string { return []string{dir} }
-	t.Cleanup(func() { listCamoDirs = old })
+	listAllCamoDirs = func() []string { return []string{dir} }
+	t.Cleanup(func() { listCamoDirs, listAllCamoDirs = old, oldAll })
 	return dir
+}
+
+// A skin installed into an install that was later turned off must still
+// uninstall, and with every install off, a new install explains why.
+func TestTurnedOffInstall(t *testing.T) {
+	dir := withCamoDir(t)
+	srv := serveZips(t, map[string][]byte{
+		"skin": makeZip(t, map[string]string{"tiger/a.dds": "A"}),
+	})
+	store := map[int]installed.Record{}
+	oldRec, oldLookup, oldForget := recordInstall, lookupInstall, forgetInstall
+	recordInstall = func(id int, kind string, paths []string) error {
+		store[id] = installed.Record{Type: kind, Paths: paths}
+		return nil
+	}
+	lookupInstall = func(id int) (installed.Record, map[string]bool, bool, error) {
+		r, ok := store[id]
+		return r, map[string]bool{}, ok, nil
+	}
+	forgetInstall = func(id int) error { delete(store, id); return nil }
+	oldRefresh := refreshGameDirs
+	refreshGameDirs = func() {}
+	t.Cleanup(func() {
+		recordInstall, lookupInstall, forgetInstall, refreshGameDirs = oldRec, oldLookup, oldForget, oldRefresh
+	})
+
+	if _, err := DownloadSkin(7, srv.URL+"/skin"); err != nil {
+		t.Fatal(err)
+	}
+	listCamoDirs = func() []string { return nil }
+
+	if _, err := DownloadSkin(8, srv.URL+"/skin"); err == nil || !strings.Contains(err.Error(), "no War Thunder install selected") {
+		t.Errorf("install with every game turned off: %v", err)
+	}
+	if _, err := Uninstall(7); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tiger")); !os.IsNotExist(err) {
+		t.Errorf("skin in a turned-off install was not removed: %v", err)
+	}
 }
 
 func readFile(t *testing.T, path string) string {

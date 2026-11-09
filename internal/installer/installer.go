@@ -33,6 +33,7 @@ var installMu sync.Mutex
 // Where installs go. Variables so tests can point them at temp folders.
 var (
 	listCamoDirs    = gamedirs.CamoDirs
+	listAllCamoDirs = gamedirs.AllCamoDirs
 	refreshGameDirs = gamedirs.Refresh
 	listSightDirs   = gamedirs.SightDirs
 	recordInstall   = installed.Add
@@ -103,9 +104,13 @@ func DownloadSkin(postId int, fileUrl string) (string, error) {
 		refreshGameDirs()
 		camoDirs = listCamoDirs()
 		if len(camoDirs) == 0 {
+			if len(listAllCamoDirs()) > 0 {
+				log.Printf("Every War Thunder install is turned off\n")
+				return "", fmt.Errorf("no War Thunder install selected: turn one on in the extension popup")
+			}
 			log.Printf("No camo directories found\n")
 			logging.OpenFolder()
-			return "", fmt.Errorf("no camo directories found")
+			return "", fmt.Errorf("no War Thunder install found: add its folder in the extension popup")
 		}
 	}
 
@@ -700,9 +705,12 @@ func Uninstall(postId int) (string, error) {
 		return "", fmt.Errorf("post %d is not installed", postId)
 	}
 
-	if rec.Type == "camo" && len(listCamoDirs()) == 0 {
+	// Every known install, not just the turned-on ones: a skin installed
+	// before its install was turned off must still be removable.
+	if rec.Type == "camo" && len(listAllCamoDirs()) == 0 {
 		refreshGameDirs()
 	}
+	allCamoDirs := listAllCamoDirs()
 	sightDirs, _ := listSightDirs()
 
 	var removed, kept int
@@ -712,7 +720,7 @@ func Uninstall(postId int) (string, error) {
 			log.Printf("Keeping %s, another installed post uses it", p)
 			kept++
 			continue
-		case rec.Type == "camo" && !isChildOf(p, listCamoDirs(), true):
+		case rec.Type == "camo" && !isChildOf(p, allCamoDirs, true):
 			log.Printf("Not removing %s: not in a UserSkins folder", p)
 			kept++
 			continue

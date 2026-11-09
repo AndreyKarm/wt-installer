@@ -17,7 +17,7 @@ It has two parts: a small tray app that does the installing, and a Firefox exten
 ## Features
 
 - **One-click install** of camouflages and sights, in the feed and in the full post view.
-- **Gaijin Launcher and Steam** installs are both supported. If you have both, skins go into each one.
+- **Gaijin Launcher and Steam** installs are both supported. If you have several (for example a regular and a dev client), skins go into each one; untick the ones you don't want in the extension popup under "Install skins into". Installs the app can't find can be added there by folder path.
 - **Never overwrites:** a different skin or sight that happens to have the same name is installed alongside as `name_2`, `name_3`, and so on. Installing the same one again is skipped.
 - **"Installed" marks:** posts you've installed show a green check on the site. Delete the files by hand and the mark disappears.
 - **Uninstall from the site:** the trash-can button next to an installed post deletes exactly what that post installed.

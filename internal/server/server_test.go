@@ -44,6 +44,10 @@ func TestHandlersRejectBadRequests(t *testing.T) {
 		{"download non-WT host", downloadHandler, "/download",
 			`{"type":"sight","postId":1,"fileUrl":"https://example.com/x.zip"}`, 500, "only allowed from War Thunder"},
 		{"openfolder bad target", openFolderHandler, "/openfolder?target=nope", "", 400, "invalid target"},
+		{"gamedirs no path", gameDirsHandler, "/gamedirs", `{"enabled":true}`, 400, "Invalid JSON"},
+		{"gamedirs bad action", gameDirsHandler, "/gamedirs", `{"path":"C:\\x","action":"nuke"}`, 400, "Invalid action"},
+		{"gamedirs no change", gameDirsHandler, "/gamedirs", `{"path":"C:\\x"}`, 400, "Invalid action"},
+		{"gamedirs add relative", gameDirsHandler, "/gamedirs", `{"path":"games\\wt","action":"add"}`, 400, "full path"},
 	}
 	for _, c := range cases {
 		rec := post(t, c.h, c.target, c.body)

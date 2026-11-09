@@ -218,6 +218,56 @@ func installedHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
+// gameDirs lets the popup choose which War Thunder installs skins go into.
+// GET re-scans and lists them. POST {path, enabled} turns one on or off;
+// POST {path, action: "add"|"remove"} adds or forgets a folder by hand.
+// Every successful call answers with the updated list.
+func gameDirsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		gamedirs.Refresh()
+	case http.MethodPost:
+		var body struct {
+			Path    string `json:"path"`
+			Enabled *bool  `json:"enabled"`
+			Action  string `json:"action"`
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Path) == "" {
+			log.Printf("Invalid gamedirs body: %v\n", err)
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch {
+		case body.Action == "add":
+			err = gamedirs.AddCustom(body.Path)
+		case body.Action == "remove":
+			err = gamedirs.RemoveCustom(body.Path)
+		case body.Action == "" && body.Enabled != nil:
+			err = gamedirs.SetEnabled(body.Path, *body.Enabled)
+		default:
+			http.Error(w, "Invalid action", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			log.Printf("Game folder change failed: %v\n", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	list := gamedirs.Installs()
+	if list == nil {
+		list = []gamedirs.Install{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
+
 // Start serves the API on 127.0.0.1:app.Port. It blocks, so run it in a
 // goroutine.
 func Start() {
@@ -229,6 +279,7 @@ func Start() {
 	mux.HandleFunc("/download", downloadHandler)
 	mux.HandleFunc("/installed", installedHandler)
 	mux.HandleFunc("/uninstall", uninstallHandler)
+	mux.HandleFunc("/gamedirs", gameDirsHandler)
 	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(logging.Entries())
 	})

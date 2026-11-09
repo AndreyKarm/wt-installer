@@ -21,6 +21,26 @@
 
     <hr class="divider" />
 
+    <div class="games-section">
+      <p class="section-title">Install skins into</p>
+      <div class="game-list" id="game-list">
+        <span class="game-empty">Loading...</span>
+      </div>
+      <form class="game-add" id="game-add-form">
+        <input
+          type="text"
+          id="game-add-path"
+          placeholder="Add folder, e.g. D:\Games\WarThunder"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <button class="game-add-btn" type="submit">Add</button>
+      </form>
+      <p class="game-error" id="game-error" hidden></p>
+    </div>
+
+    <hr class="divider" />
+
     <button class="loc-btn" id="btn-installer" type="button">
       <span>📁</span><span>Open Installer Folder</span>
     </button>

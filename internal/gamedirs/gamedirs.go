@@ -19,11 +19,39 @@ type registryPath struct {
 	valName string
 }
 
-// camoDirs is guarded by mu: Refresh can run from HTTP handlers while
-// other requests read it.
+// Install is one War Thunder install folder and whether skins go into it.
+type Install struct {
+	Path string `json:"path"`
+	// Source is how it was found: "launcher" (Gaijin registry key),
+	// "steam", "nearby" (next to the launcher's install) or "custom"
+	// (added by the user).
+	Source  string `json:"source"`
+	Enabled bool   `json:"enabled"`
+	// Found is false for a custom folder that is gone or no longer looks
+	// like a game install. Such folders are listed but never used.
+	Found bool `json:"found"`
+}
+
+// installs is guarded by mu: Refresh can run from HTTP handlers while
+// other requests read it. settingsMu serializes read-modify-write of the
+// settings file.
 var (
-	mu       sync.RWMutex
-	camoDirs []string
+	mu         sync.RWMutex
+	installs   []Install
+	settingsMu sync.Mutex
+)
+
+// Where installs are looked up. Variables so tests don't depend on this
+// machine's registry.
+var (
+	launcherDir = func() (string, error) { return openRegistryValue(launcherRegistryPath) }
+	steamDir    = func() (string, error) {
+		steamPath, err := openRegistryValue(steamRegistryPath)
+		if err != nil {
+			return "", err
+		}
+		return FindSteamGamePath(steamPath)
+	}
 )
 
 var launcherRegistryPath = registryPath{
@@ -40,12 +68,46 @@ var steamRegistryPath = registryPath{
 
 const warThunderSteamAppID = "236390"
 
-// CamoDirs returns a copy of the UserSkins directories found by the last
-// Refresh.
+// CamoDirs returns the UserSkins directories of the installs found by the
+// last Refresh that the user hasn't turned off.
 func CamoDirs() []string {
 	mu.RLock()
 	defer mu.RUnlock()
-	return append([]string(nil), camoDirs...)
+	var dirs []string
+	for _, in := range installs {
+		if in.Enabled && in.Found {
+			dirs = append(dirs, filepath.Join(in.Path, "UserSkins"))
+		}
+	}
+	return dirs
+}
+
+// AllCamoDirs returns the UserSkins directories of every known install,
+// including turned-off ones, so uninstall still cleans up a skin installed
+// before its install was turned off.
+func AllCamoDirs() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	dirs := make([]string, 0, len(installs))
+	for _, in := range installs {
+		dirs = append(dirs, filepath.Join(in.Path, "UserSkins"))
+	}
+	return dirs
+}
+
+// Installs returns a copy of the installs found by the last Refresh.
+func Installs() []Install {
+	mu.RLock()
+	defer mu.RUnlock()
+	return append([]Install(nil), installs...)
+}
+
+// looksLikeGameDir reports whether dir holds a War Thunder install.
+// aces.vromfs.bin is the main game archive, present in launcher and Steam
+// installs alike.
+func looksLikeGameDir(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "aces.vromfs.bin"))
+	return err == nil && !info.IsDir()
 }
 
 func openRegistryValue(p registryPath) (string, error) {
@@ -63,26 +125,198 @@ func openRegistryValue(p registryPath) (string, error) {
 // running even if the game wasn't found yet, instead of killing the whole
 // background service.
 func Refresh() {
-	dirs, err := FindAll()
+	s, err := loadSettings()
+	if err != nil {
+		log.Printf("Warning: could not read settings, using defaults: %v", err)
+	}
+	list := discover(s)
 	_, sightErr := SightDirs()
 
 	mu.Lock()
-	defer mu.Unlock()
+	installs = list
+	mu.Unlock()
 
-	if err != nil {
-		log.Printf("Warning: no War Thunder installation found yet: %v", err)
-		camoDirs = nil
+	if len(list) == 0 {
+		log.Printf("Warning: no War Thunder installation found yet")
 	} else {
-		camoDirs = make([]string, len(dirs))
-		for i, d := range dirs {
-			camoDirs[i] = filepath.Join(d, "UserSkins")
+		var parts []string
+		for _, in := range list {
+			state := "on"
+			switch {
+			case !in.Found:
+				state = "missing"
+			case !in.Enabled:
+				state = "off"
+			}
+			parts = append(parts, fmt.Sprintf("%s (%s, %s)", in.Path, in.Source, state))
 		}
-		log.Printf("Found War Thunder install(s): %s", strings.Join(dirs, ", "))
+		log.Printf("War Thunder install(s): %s", strings.Join(parts, ", "))
 	}
 
 	if sightErr != nil {
 		log.Printf("Warning: could not find sight folders: %v", sightErr)
 	}
+}
+
+// discover lists every install: the Gaijin Launcher's, Steam's, game
+// folders next to the launcher's, and the user's custom folders. The
+// launcher keeps a single InstallDir and rewrites it to whichever install
+// ran last, so with a second copy (for example a dev client) the other
+// one is only found by looking next to it.
+func discover(s settings) []Install {
+	var list []Install
+	add := func(path, source string, found bool) {
+		if path == "" || containsPath(pathsOf(list), path) {
+			return
+		}
+		list = append(list, Install{
+			Path:    filepath.Clean(path),
+			Source:  source,
+			Enabled: !containsPath(s.DisabledDirs, path),
+			Found:   found,
+		})
+	}
+
+	launcher, launcherErr := launcherDir()
+	if launcherErr == nil {
+		add(launcher, "launcher", dirExists(launcher))
+	}
+	if steam, err := steamDir(); err == nil {
+		add(steam, "steam", dirExists(steam))
+	}
+	if launcherErr == nil {
+		for _, dir := range nearbyGameDirs(launcher) {
+			add(dir, "nearby", true)
+		}
+	}
+	for _, dir := range s.CustomDirs {
+		add(dir, "custom", looksLikeGameDir(dir))
+	}
+	return list
+}
+
+// nearbyGameDirs returns game installs in the same parent folder as dir
+// (for example F:\Games\WarThunder next to F:\Games\WarThunderDev).
+func nearbyGameDirs(dir string) []string {
+	parent := filepath.Dir(filepath.Clean(dir))
+	if parent == filepath.Clean(dir) {
+		return nil
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(parent, e.Name())
+		if pathKey(p) != pathKey(dir) && looksLikeGameDir(p) {
+			dirs = append(dirs, p)
+		}
+	}
+	return dirs
+}
+
+func pathsOf(list []Install) []string {
+	paths := make([]string, len(list))
+	for i, in := range list {
+		paths[i] = in.Path
+	}
+	return paths
+}
+
+func dirExists(dir string) bool {
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
+}
+
+// updateSettings applies change to the saved settings and re-scans.
+func updateSettings(change func(*settings) error) error {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	s, err := loadSettings()
+	if err != nil {
+		// A corrupt file shouldn't lock the user out of fixing it.
+		log.Printf("Settings unreadable, starting over: %v", err)
+		s = settings{}
+	}
+	if err := change(&s); err != nil {
+		return err
+	}
+	if err := saveSettings(s); err != nil {
+		log.Printf("Save settings: %v", err)
+		return fmt.Errorf("save settings: %w", err)
+	}
+	Refresh()
+	return nil
+}
+
+// SetEnabled turns skin installs into a known install on or off.
+func SetEnabled(path string, enabled bool) error {
+	if !containsPath(pathsOf(Installs()), path) {
+		Refresh()
+		if !containsPath(pathsOf(Installs()), path) {
+			return fmt.Errorf("unknown install folder %s", path)
+		}
+	}
+	return updateSettings(func(s *settings) error {
+		s.DisabledDirs = withoutPath(s.DisabledDirs, path)
+		if !enabled {
+			s.DisabledDirs = append(s.DisabledDirs, filepath.Clean(path))
+		}
+		return nil
+	})
+}
+
+// CleanInputPath turns a pasted folder path into an install folder: it
+// drops surrounding quotes (Explorer's "Copy as path" adds them) and a
+// trailing UserSkins, in case the user copied that folder instead.
+func CleanInputPath(path string) string {
+	path = strings.Trim(strings.TrimSpace(path), `"`)
+	if path == "" {
+		return ""
+	}
+	path = filepath.Clean(path)
+	if strings.EqualFold(filepath.Base(path), "UserSkins") {
+		path = filepath.Dir(path)
+	}
+	return path
+}
+
+// AddCustom adds an install folder by hand and turns it on. The folder must
+// look like a game install, so the API can't be used to write skins into
+// arbitrary folders.
+func AddCustom(path string) error {
+	path = CleanInputPath(path)
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("enter the full path of the War Thunder folder")
+	}
+	if !looksLikeGameDir(path) {
+		return fmt.Errorf("%s does not look like a War Thunder folder (no aces.vromfs.bin)", path)
+	}
+	return updateSettings(func(s *settings) error {
+		s.DisabledDirs = withoutPath(s.DisabledDirs, path)
+		if !containsPath(s.CustomDirs, path) && !containsPath(pathsOf(Installs()), path) {
+			s.CustomDirs = append(s.CustomDirs, path)
+		}
+		return nil
+	})
+}
+
+// RemoveCustom forgets a folder added with AddCustom. Detected installs
+// can only be turned off.
+func RemoveCustom(path string) error {
+	return updateSettings(func(s *settings) error {
+		if !containsPath(s.CustomDirs, path) {
+			return fmt.Errorf("%s was not added by hand", path)
+		}
+		s.CustomDirs = withoutPath(s.CustomDirs, path)
+		s.DisabledDirs = withoutPath(s.DisabledDirs, path)
+		return nil
+	})
 }
 
 // ParseVDFKV parses a single VDF line of the form "key"  "value"
@@ -155,37 +389,6 @@ func FindSteamGamePath(steamPath string) (string, error) {
 
 	log.Printf("War Thunder not found in any Steam library")
 	return "", fmt.Errorf("War Thunder not found in any Steam library")
-}
-
-// FindAll checks for both the Gaijin Launcher and Steam installations and
-// returns every one that is actually present, instead of stopping at the
-// first match.
-func FindAll() ([]string, error) {
-	var dirs []string
-	seen := make(map[string]bool)
-
-	if gamePath, err := openRegistryValue(launcherRegistryPath); err == nil {
-		if !seen[gamePath] {
-			seen[gamePath] = true
-			dirs = append(dirs, gamePath)
-		}
-	}
-
-	if steamPath, err := openRegistryValue(steamRegistryPath); err == nil {
-		if steamGamePath, err := FindSteamGamePath(steamPath); err == nil {
-			if !seen[steamGamePath] {
-				seen[steamGamePath] = true
-				dirs = append(dirs, steamGamePath)
-			}
-		}
-	}
-
-	if len(dirs) == 0 {
-		log.Printf("War Thunder installation not found")
-		return nil, fmt.Errorf("War Thunder installation not found")
-	}
-
-	return dirs, nil
 }
 
 // SavesDirBase returns Documents\My Games\WarThunder\Saves.

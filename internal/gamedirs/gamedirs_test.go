@@ -3,8 +3,109 @@ package gamedirs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// fakeGame creates a folder that looks like a War Thunder install.
+func fakeGame(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "aces.vromfs.bin"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// withFakeMachine points the registry lookups at launcher (empty = none)
+// and the settings file at a temp folder.
+func withFakeMachine(t *testing.T, launcher string) {
+	t.Helper()
+	oldL, oldS, oldPath := launcherDir, steamDir, settingsPath
+	launcherDir = func() (string, error) {
+		if launcher == "" {
+			return "", os.ErrNotExist
+		}
+		return launcher, nil
+	}
+	steamDir = func() (string, error) { return "", os.ErrNotExist }
+	settingsPath = filepath.Join(t.TempDir(), "settings.json")
+	t.Cleanup(func() {
+		launcherDir, steamDir, settingsPath = oldL, oldS, oldPath
+		Refresh()
+	})
+}
+
+// The launcher's registry key only names the install that ran last; a
+// second install next to it must be found too.
+func TestDiscoverFindsNearbyInstall(t *testing.T) {
+	games := t.TempDir()
+	dev := fakeGame(t, filepath.Join(games, "WarThunderDev"))
+	regular := fakeGame(t, filepath.Join(games, "WarThunder"))
+	os.MkdirAll(filepath.Join(games, "OtherGame"), 0755)
+	withFakeMachine(t, dev)
+
+	Refresh()
+	got := Installs()
+	if len(got) != 2 || got[0].Path != dev || got[0].Source != "launcher" ||
+		got[1].Path != regular || got[1].Source != "nearby" {
+		t.Fatalf("installs: %+v", got)
+	}
+	if dirs := CamoDirs(); len(dirs) != 2 {
+		t.Errorf("both installs should be on by default: %v", dirs)
+	}
+}
+
+func TestEnableAddRemove(t *testing.T) {
+	games := t.TempDir()
+	dev := fakeGame(t, filepath.Join(games, "WarThunderDev"))
+	regular := fakeGame(t, filepath.Join(games, "WarThunder"))
+	custom := fakeGame(t, filepath.Join(t.TempDir(), "WT Copy"))
+	withFakeMachine(t, dev)
+	Refresh()
+
+	// Paths are compared case-insensitively, like Windows does.
+	if err := SetEnabled(strings.ToUpper(dev), false); err != nil {
+		t.Fatal(err)
+	}
+	if dirs := CamoDirs(); len(dirs) != 1 || dirs[0] != filepath.Join(regular, "UserSkins") {
+		t.Errorf("after turning dev off: %v", dirs)
+	}
+	if len(AllCamoDirs()) != 2 {
+		t.Errorf("turned-off install missing from AllCamoDirs: %v", AllCamoDirs())
+	}
+	if err := SetEnabled(filepath.Join(games, "Nope"), true); err == nil {
+		t.Errorf("enabled an unknown folder")
+	}
+
+	if err := AddCustom(`"` + filepath.Join(custom, "UserSkins") + `"`); err != nil {
+		t.Fatal(err)
+	}
+	if dirs := CamoDirs(); len(dirs) != 2 || dirs[1] != filepath.Join(custom, "UserSkins") {
+		t.Errorf("after adding custom: %v", dirs)
+	}
+	if err := AddCustom(t.TempDir()); err == nil || !strings.Contains(err.Error(), "does not look like") {
+		t.Errorf("added a non-game folder: %v", err)
+	}
+	if err := RemoveCustom(dev); err == nil {
+		t.Errorf("removed a detected install")
+	}
+
+	// Settings survive a restart.
+	Refresh()
+	if dirs := CamoDirs(); len(dirs) != 2 {
+		t.Errorf("after re-scan: %v", dirs)
+	}
+
+	if err := RemoveCustom(custom); err != nil {
+		t.Fatal(err)
+	}
+	if got := Installs(); len(got) != 2 {
+		t.Errorf("custom folder still listed: %+v", got)
+	}
+}
 
 func TestParseVDFKV(t *testing.T) {
 	for line, want := range map[string][2]string{
